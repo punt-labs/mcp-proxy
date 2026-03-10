@@ -1,21 +1,21 @@
 # mcp-proxy
 
-A lightweight, generic proxy that bridges MCP stdio transport to a shared daemon process.
+A lightweight Go proxy that bridges MCP stdio transport to a shared daemon process, eliminating per-session resource duplication.
 
 ## Problem
 
-Claude Code spawns one MCP server process per session via stdio transport. When a project holds expensive shared state — a database index, a message bus connection, an audio output device, a display server — every session duplicates that state. With many concurrent sessions on a single machine, this multiplies memory, file handles, connections, and contention.
+Claude Code spawns one MCP server process per session via stdio transport. When a project holds expensive shared state, every session duplicates it:
 
 | Project | Shared Resource | Cost Per Session |
 |---------|----------------|-----------------|
 | Quarry  | LanceDB index + ONNX embedding model | ~200MB memory, database lock contention |
 | Biff    | NATS relay connection | TCP connection per session, duplicated KV watches |
-| Vox     | Audio output device | File lock contention (`flock` on `playback.lock`), redundant provider clients |
-| Lux     | ImGui display server | Already centralized via Unix socket — but MCP layer still per-session |
+| Vox     | Audio output device | File lock contention (`flock`), redundant provider clients |
+| Lux     | ImGui display server | Already centralized — but MCP layer still per-session |
 
 ## Solution
 
-A single static Go binary that reads MCP JSON-RPC from stdin and forwards it to a shared daemon. The proxy is transport-agnostic — it doesn't know what tools exist. It's a transparent JSON-RPC forwarder.
+A single static Go binary reads MCP JSON-RPC from stdin and forwards it to a shared daemon. The proxy is transparent — it doesn't know what tools exist. Tool discovery, listing, and execution pass through unchanged.
 
 ```text
                     stdio                      daemon transport
@@ -23,447 +23,218 @@ Claude Code ◄──────────────► mcp-proxy ◄──
              MCP JSON-RPC                                       (one process)
 ```
 
-Each project's `plugin.json` changes from spawning the full server to spawning the proxy:
-
 ```json
-{
-  "mcpServers": {
-    "quarry": {
-      "type": "stdio",
-      "command": "mcp-proxy",
-      "args": ["ws://localhost:8080/mcp"]
-    }
-  }
-}
+{"mcpServers": {"quarry": {"type": "stdio", "command": "mcp-proxy", "args": ["ws://localhost:8080/mcp"]}}}
 ```
+
+## Design Goals
+
+1. **Near-zero startup cost.** <10ms spawn, <10MB memory. Go static binary. Python (~300ms, ~50MB) and Node (~100ms, ~30MB) don't meet this bar.
+2. **Transparent JSON-RPC forwarding.** Forwards the entire MCP protocol unchanged. The daemon is the real MCP server.
+3. **Session identity injection.** Resolves "which Claude session am I?" and passes it to the daemon at connection time. Replaces process-tree walking heuristics. See [Session Identity](#session-identity).
+4. **Single transport backend.** One proxy-to-daemon protocol that supports bidirectional messaging (server push), because biff and lux require it.
+5. **Single binary, no dependencies.** Static binary per platform (darwin/arm64, darwin/amd64, linux/arm64, linux/amd64).
+6. **Daemon lifecycle is not the proxy's job.** Assumes the daemon is running. Exits with a clear error if it can't connect.
 
 ## Transport Options
 
-The proxy-to-daemon transport is the critical design decision. Three options are under consideration.
+The proxy-to-daemon transport must support **bidirectional messaging** — biff needs to push `tools/list_changed` and lux needs to push interaction events. This is the critical constraint that eliminates HTTP as a standalone option.
 
-### Option A: HTTP
-
-The proxy sends each MCP JSON-RPC message as an HTTP POST and reads the response.
-
-```text
-Session A ──stdio──▶ [mcp-proxy → POST /mcp]  ──┐
-Session B ──stdio──▶ [mcp-proxy → POST /mcp]  ──┤──▶ daemon :PORT
-Session C ──stdio──▶ [mcp-proxy → POST /mcp]  ──┘     (HTTP server)
-```
-
-**Pros:**
-
-- Simplest to implement — Go's `net/http` is stdlib, no dependencies.
-- Existing daemons already speak HTTP (`quarry serve`, `biff serve`). Zero daemon-side changes for basic tool calls.
-- Request-response maps naturally to MCP tool calls (client sends `tools/call`, server responds).
-- Stateless — any proxy can talk to any daemon instance. Load balancing and restarts are trivial.
-
-**Cons:**
-
-- **No server push.** HTTP is request-response. The daemon cannot send `tools/list_changed` notifications to a specific proxy unprompted. This is a critical gap for biff (unread count changes), lux (interaction events), and potentially quarry (background ingest completion). Workarounds: (a) bolt on SSE for a push sidecar, (b) proxy polls for pending notifications, (c) daemon writes to a file the proxy watches. All three add complexity that erodes the "simplest" advantage.
-- Per-request overhead — HTTP headers, content-length framing, status codes. Minor for local traffic but non-zero.
-- Session identity must be passed as HTTP headers (`X-Session-Key`) on every request. No persistent session context.
-
-**Verdict:** Works for request-response-only tools (quarry search, vox synthesis). Breaks down for projects that need server-initiated push (biff, lux). The notification routing workarounds are complex enough to negate the simplicity advantage.
-
-### Option B: Raw Unix Domain Socket
-
-The proxy opens a persistent Unix domain socket connection to the daemon. Messages are length-prefixed JSON-RPC (4-byte big-endian length + UTF-8 payload). Bidirectional — either side can send at any time.
-
-```text
-Session A ──stdio──▶ [mcp-proxy] ◄──unix socket──▶ daemon.sock
-Session B ──stdio──▶ [mcp-proxy] ◄──unix socket──▶   (one socket,
-Session C ──stdio──▶ [mcp-proxy] ◄──unix socket──▶    N connections)
-```
-
-**Pros:**
-
-- **Bidirectional.** The daemon can push `tools/list_changed` to any connected proxy at any time. Solves biff's notification routing and lux's interaction events natively.
-- **Persistent connection.** Session identity is established once at connection time (registration message). No per-request headers. The daemon maintains a map of session → connection for targeted push.
-- **Lowest latency.** No HTTP framing, no TCP stack (kernel IPC only). Lux already proves this: ~10ms content update, ~20ms RTT (DES-002 spike data).
-- **Matches existing Lux architecture.** Lux's display server already uses 4-byte length-prefixed JSON over Unix socket (DES-002/003). Same wire format.
-
-**Cons:**
-
-- **DIY framing.** Must implement length-prefix encoding/decoding. Not hard (~20 lines of Go), but it's custom protocol work that must be correct.
-- **DIY keepalive.** Must implement heartbeat/ping to detect dead connections. Dead proxy detection is critical for biff session cleanup.
-- **Local-only.** Unix domain sockets don't work across machines. Fine for the stated use case (many sessions on one machine), but closes the door on remote daemons.
-- **Socket path management.** Must agree on a socket path. Discovery logic needed (XDG_RUNTIME_DIR, fallbacks). Port numbers are simpler to configure and share.
-- **No ecosystem for existing daemons.** `quarry serve` and `biff serve` speak HTTP today. Adding a Unix socket listener is new server-side code.
-
-**Verdict:** Solves the bidirectional push problem cleanly. Lower-level than necessary — reimplements framing and keepalive that existing protocols provide.
-
-### Option C: WebSocket
-
-The proxy opens a persistent WebSocket connection to the daemon. Messages are MCP JSON-RPC (text frames). Bidirectional — either side can send at any time.
-
-```text
-Session A ──stdio──▶ [mcp-proxy] ◄──WebSocket──▶ daemon :PORT/mcp
-Session B ──stdio──▶ [mcp-proxy] ◄──WebSocket──▶   (one server,
-Session C ──stdio──▶ [mcp-proxy] ◄──WebSocket──▶    N connections)
-```
-
-**Pros:**
-
-- **Bidirectional.** Same as Unix socket — daemon can push to any proxy at any time. `tools/list_changed`, interaction events, background completion notifications all work natively.
-- **Persistent connection with session context.** Session identity sent once at connection time (as a query parameter, header, or initial message). The daemon maintains session → connection mapping.
-- **Built-in framing.** RFC 6455 message framing — no DIY length-prefix encoding. Each WebSocket message is one MCP JSON-RPC message.
-- **Built-in keepalive.** Ping/pong frames are part of the spec. Dead connection detection is automatic. Libraries handle this transparently.
-- **Battle-tested libraries.** Go: `nhooyr.io/websocket` or `github.com/gorilla/websocket`. Python: `websockets`. Every language has production-quality implementations.
-- **Additive to existing HTTP daemons.** WebSocket starts as an HTTP upgrade. Existing daemons (`quarry serve`, `biff serve`) add a `/mcp` WebSocket endpoint alongside their existing HTTP API. One server, two protocols — HTTP for REST clients (quarry-menubar, CLI), WebSocket for MCP proxy connections.
-- **Works over TCP and Unix socket.** WebSocket libraries support custom dialers — can run over Unix domain socket for lowest latency, or TCP localhost for simplicity. The proxy doesn't care.
-- **Network-capable (future).** Unlike raw Unix sockets, WebSocket works across machines (`wss://host/mcp`). Not needed today (all sessions are local), but doesn't close the door.
-
-**Cons:**
-
-- **HTTP upgrade handshake.** One extra round-trip at connection time (HTTP → 101 Switching Protocols → WebSocket). Negligible for a persistent connection, but it's there.
-- **Slightly more overhead than raw socket.** WebSocket framing adds 2-10 bytes per message vs. 4 bytes for length-prefix. Irrelevant for local JSON-RPC traffic.
-- **External dependency in Go.** Go's stdlib has no WebSocket support. Requires a third-party library (`nhooyr.io/websocket` is the standard choice — well-maintained, correct, minimal).
-- **More complex than HTTP for simple cases.** If a project only needs request-response (no push), WebSocket is more machinery than needed. But the proxy is a shared component — it must handle the hardest case (biff), so the simpler projects come along for free.
-
-**Verdict:** Combines the bidirectional capability of raw Unix sockets with the ecosystem maturity of HTTP. Solves the notification routing problem without DIY framing or keepalive. Adds naturally to existing HTTP daemons as a WebSocket upgrade endpoint.
-
-### Comparison Matrix
+### Comparison
 
 | Criterion | HTTP | Raw Unix Socket | WebSocket |
 |-----------|------|----------------|-----------|
-| Server push (notifications) | No | Yes | Yes |
+| Server push (notifications) | **No** | Yes | Yes |
 | Built-in framing | Yes (HTTP) | No (DIY) | Yes (RFC 6455) |
 | Built-in keepalive | No | No (DIY) | Yes (ping/pong) |
 | Persistent session | No (per-request) | Yes | Yes |
 | Go stdlib support | Yes | Yes | No (third-party) |
 | Existing daemon compat | Direct | New listener needed | HTTP upgrade endpoint |
 | Cross-machine (future) | Yes | No | Yes |
-| Latency | Low | Lowest | Low |
-| Implementation complexity | Lowest | Medium | Low-Medium |
+| Debuggability | curl | socat + NDJSON | wscat |
 
-**Leaning toward Option C (WebSocket)** — it solves the notification routing problem (the hardest challenge identified for biff and lux) while adding naturally to existing HTTP daemons. To be revisited after further review.
+### Option A: HTTP
 
-## Design Goals
+Request-response only. Existing daemons (`quarry serve`, `biff serve`) already speak it. Simplest to implement (Go stdlib). But **no server push** — the daemon cannot send `tools/list_changed` to a proxy unprompted. Workarounds (SSE sidecar, proxy polling, file watching) add complexity that erodes the simplicity advantage.
 
-1. **Near-zero startup cost.** The proxy must spawn in <10ms and use <10MB memory. This is the entire point — if the proxy is expensive, it defeats the purpose. Go produces static binaries with instant startup; Python (~300ms, ~50MB) and Node (~100ms, ~30MB) do not meet this bar.
+**Verdict:** Works for request-response-only tools. Fails for biff and lux.
 
-2. **Transparent JSON-RPC forwarding.** The proxy does not interpret tool names, arguments, or responses. It forwards the entire MCP protocol — `initialize`, `tools/list`, `tools/call`, `notifications/*`, everything. Tool discovery, listing, and execution pass through unchanged. The daemon is the real MCP server.
+### Option B: Raw Unix Domain Socket
 
-3. **Session identity injection.** The proxy resolves "which Claude Code session am I in?" and passes that identity to the daemon at connection time. This replaces process-tree walking heuristics in downstream projects. See [Session Identity](#session-identity).
+Persistent bidirectional connection. NDJSON (newline-delimited JSON) or length-prefixed framing. Daemon can push to any connected proxy at any time. Lowest latency (kernel IPC, no TCP). SageOx ships this in production (see [Prior Art](#sageox-sageoxox)).
 
-4. **Single transport backend.** One proxy-to-daemon protocol. Every daemon speaks it. The transport must support bidirectional messaging (server push) because biff and lux require it.
+**Trade-off:** DIY framing and keepalive (~20 lines of Go each, but must be correct). NDJSON is debuggable with `echo '{"type":"ping"}' | socat - UNIX:/path/sock` — SageOx chose this over length-prefix specifically for debuggability. Local-only (no cross-machine).
 
-5. **Single binary, no dependencies.** Ships as a static binary per platform (darwin/arm64, darwin/amd64, linux/arm64, linux/amd64). No runtime dependencies. Distributed alongside Python packages via `install.sh` or independently.
+**Verdict:** Solves push. Lower-level than necessary — reimplements what WebSocket provides.
 
-6. **Daemon lifecycle is not the proxy's job.** The proxy assumes the daemon is already running. If it can't connect, it exits with a clear error. Starting/stopping the daemon is the project's responsibility (e.g., `quarry serve`, `biff serve`, `lux display`).
+### Option C: WebSocket
+
+Persistent bidirectional connection with built-in framing (RFC 6455), keepalive (ping/pong), and dead connection detection. Go libraries: `nhooyr.io/websocket` or `gorilla/websocket`. **Adds as an HTTP upgrade endpoint** to existing daemons — one server serves both HTTP API clients (quarry-menubar) and WebSocket proxy connections. Works over TCP localhost or Unix socket (custom dialer).
+
+**Verdict:** Combines Unix socket's bidirectional push with HTTP's ecosystem maturity. Solves notification routing without DIY framing or keepalive.
+
+**Leaning toward Option C (WebSocket).** To be revisited.
 
 ## Session Identity
 
-### The Problem
+Biff uses process-tree walking to find the topmost `claude` ancestor PID (DES-011/011a). With a shared daemon, this breaks — the daemon has no Claude ancestor.
 
-Biff uses the session key to determine "which Claude Code session is this?" — critical for per-session unread counts, TTY names, and `/talk` presence. The current mechanism (DES-011/011a in biff's DESIGN.md) walks the process tree upward to find the topmost `claude` ancestor PID. Both the MCP server and the status line converge on the same PID as a file key.
-
-With a shared daemon, this breaks. The daemon has no Claude ancestor — it's a shared process serving all sessions. It cannot infer session identity from its own process tree.
-
-### The Fix
-
-The proxy *can* resolve the session key — it is still a child of the Claude Code process tree. It performs the ancestor walk once at startup, then passes the result to the daemon at connection time:
-
-**HTTP (Option A):** Header on every request.
-
-```text
-mcp-proxy → POST /mcp
-            X-Session-Key: 19147
-```
-
-**WebSocket / Unix Socket (Options B, C):** Registration message at connection time.
+**Fix:** The proxy resolves the session key (it *is* a child of Claude) and passes it at connection time:
 
 ```json
 {"type": "register", "session_key": "19147", "pid": 83201}
 ```
 
-The daemon uses the provided key instead of inferring it. This is cleaner than the current model — no more process-tree walking heuristics inside the daemon, no more DES-011a/011b edge cases with local-vs-marketplace plugin process tree divergence.
+**Resolution algorithm:** Parse process table (`ps -eo pid=,ppid=,comm=`), walk upward from proxy PID, find topmost `claude` ancestor, fall back to PPID. Cached for process lifetime. Direct port of `find_session_key()` from `biff/src/biff/session_key.py`.
 
-### Resolution Algorithm
-
-1. Parse the full process table (`ps -eo pid=,ppid=,comm=`)
-2. Walk upward from the proxy's own PID
-3. Find the topmost ancestor whose `comm` basename is `claude`
-4. Fall back to `os.Getppid()` if no `claude` ancestor found
-5. Cache the result — the ancestor PID never changes for the lifetime of the process
-
-This is a direct port of `find_session_key()` from `biff/src/biff/session_key.py`.
+This fixes DES-011b (local vs marketplace plugin process tree divergence) — the proxy always resolves from its own tree regardless of plugin installation method.
 
 ## Target Daemons
 
-### Quarry (`quarry serve`)
+### Quarry (`quarry serve`) — easiest migration
 
-**Daemon**: `quarry serve` — stdlib HTTP server, already exists. Translates JSON requests to core library calls.
+`quarry serve` (stdlib HTTP) already exists. Each `quarry mcp` session currently loads its own LanceDB index and ONNX embedding model (~200MB). The daemon shares one index and one model across all sessions.
 
-**Current model**: `quarry mcp` spawns a full MCP server per session. Each loads the LanceDB index and ONNX embedding model into memory. The `quarry serve` HTTP server exists independently but is not used by the MCP server.
+**Complications:**
 
-**Proxy model**: Proxy connects to `quarry serve` (which gains a WebSocket/socket endpoint). One index, one model, many sessions.
+- **Database switching.** The `use` tool switches the active database — currently per-process state. Must become per-session (keyed by proxy session identity).
+- **Fire-and-forget.** Side-effect tools (ingest, delete, sync) return optimistic responses and process in a background `ThreadPoolExecutor`. Daemon preserves this; with bidirectional transport, can optionally push completion notifications.
+- **MCP `instructions` field.** Proxy must forward the daemon's `initialize` response (which includes formatting guidance) without modification.
 
-**Complications**:
+### Biff (`biff serve`) — hardest migration
 
-- **Fire-and-forget pattern.** Quarry's MCP server uses a `ThreadPoolExecutor(max_workers=4)` for side-effect tools (ingest, delete, sync). These return an optimistic response immediately and process in the background. The daemon must preserve this behavior — the proxy forwards the optimistic response, the daemon does the background work. With a bidirectional transport (Options B/C), the daemon could optionally push a completion notification when background work finishes — an improvement over the current fire-and-forget-with-no-feedback model.
-- **Database switching.** The `use` MCP tool switches the active database. In the current model, this is per-process state. With a shared daemon, database selection must be per-session (keyed by session identity from the proxy). The daemon needs session-scoped state for the active database name.
-- **Embedding model memory.** The ONNX model is ~100MB in memory. Sharing it across sessions is the primary memory win. But the model is loaded lazily on first search — the daemon must load it once and share it.
-- **Sync registry.** Directory registrations (`register_directory`, `deregister_directory`) are currently global. With a shared daemon this is fine — registrations are per-database, not per-session.
-- **MCP `instructions` field.** Quarry's MCP server sets an `instructions` field on the server that loads formatting guidance. The proxy must forward this from the daemon's `initialize` response without modification.
+`biff serve` exists with both stdio and HTTP transports. The entire architecture revolves around per-session state: `{user}:{tty}` session key (DES-002), unread counts, talk partner, mesg mode, plan text.
 
-### Biff (`biff serve`)
+**Complications:**
 
-**Daemon**: `biff serve` — exists, supports both stdio and HTTP transports via the same `_create_mcp_server()` function.
-
-**Current model**: `biff mcp` spawns per session. Each creates its own `ServerState` with a `Relay` (NATS or local). The session key (user:tty) is generated at startup.
-
-**Proxy model**: Proxy connects to `biff serve` (which gains a WebSocket/socket endpoint). One NATS connection, many sessions.
-
-**Complications**:
-
-- **Session identity is foundational.** Biff's entire architecture revolves around the `{user}:{tty}` session key (DES-002). The daemon must maintain per-session state: TTY name, unread counts, talk partner, mesg mode, plan text. The proxy's session registration becomes the demux key.
-- **PPID-keyed unread files.** The status line reads `~/.biff/unread/{ppid}.json`. With a shared daemon, the daemon still needs to write these files keyed by the Claude ancestor PID — which it receives from the proxy at connection time. This actually *fixes* DES-011b (local vs marketplace process tree divergence) because the proxy always resolves from its own tree.
-- **Dynamic tool descriptions.** Biff mutates tool descriptions per-session (unread count, talk partner). With a shared daemon, the `tools/list` response must be customized per session. The persistent connection (Options B/C) makes this natural — the daemon knows which session is asking because each connection is registered.
-- **`tools/list_changed` notifications.** The background poller fires `tools/list_changed` when unread counts change. With HTTP (Option A), this is the hardest problem — no way to push. **With WebSocket or Unix socket (Options B/C), this is solved** — the daemon pushes the notification down the correct session's persistent connection. The proxy writes it to stdout. Claude Code receives it as if the MCP server sent it directly.
-- **Belt-and-suspenders notification paths.** The current "belt" path (inside tool handler) and "suspenders" path (background poller) both assume one session per process. With a shared daemon, the suspenders path becomes: poller detects count change → daemon looks up session's WebSocket/socket connection → pushes notification. Simpler than the current two-path design because the daemon has direct access to every session's connection.
-- **Lifespan cleanup.** The MCP server deletes its PPID-keyed unread file on shutdown. With a persistent connection (Options B/C), the daemon detects proxy disconnect via connection close (or keepalive timeout). Cleanup triggers on disconnect, not on daemon stop. WebSocket ping/pong (Option C) makes dead connection detection automatic.
-- **NATS connection conservation.** DES-019 settled on keeping the NATS connection open even during idle (nap mode). With a shared daemon, this is simpler — one persistent connection serves all sessions. The nap-mode polling frequency reduction can still apply per-session for the poller logic.
-- **Long-lived sessions with idle time.** DES-008 requires sessions to persist for 30 days. The daemon must not garbage-collect sessions just because a proxy disconnected temporarily (e.g., Claude Code restart). Session state should persist in the relay (NATS KV / local filesystem) with the proxy connection being a transient delivery channel, not the session's lifetime.
+- **`tools/list_changed` push.** Background poller fires notifications when unread counts change. With HTTP, this is unsolvable without workarounds. **With WebSocket/socket, solved** — daemon pushes down the session's persistent connection.
+- **PPID-keyed unread files.** Status line reads `~/.biff/unread/{ppid}.json`. Daemon writes these keyed by the Claude PID received from the proxy. Actually *fixes* DES-011b.
+- **Dynamic tool descriptions.** Per-session tool description mutation (unread count, talk partner). Persistent connection makes this natural — daemon knows which session is asking.
+- **Belt-and-suspenders simplification.** Current two-path notification design (tool-handler "belt" + background-poller "suspenders") collapses to one: poller → daemon → session connection → proxy → stdout.
+- **Session cleanup.** Currently deletes PPID file on shutdown. With persistent connection, cleanup triggers on proxy disconnect (detected via keepalive timeout).
+- **Session lifetime vs connection lifetime.** DES-008 requires 30-day session persistence. Session state persists in the relay (NATS KV / filesystem); the proxy connection is a transient delivery channel, not the session's lifetime.
 
 ### Vox (new daemon needed)
 
-**Daemon**: Does not exist yet. Vox currently has no `serve` command. One would need to be built.
+No `serve` command exists. Must be built. Currently uses `flock` on `~/.punt-vox/playback.lock` for cross-session audio serialization.
 
-**Current model**: `vox mcp` spawns per session. Each loads provider configuration and manages its own audio queue. Cross-session coordination uses `flock` on `~/.punt-vox/playback.lock`.
+**Complications:**
 
-**Proxy model**: Proxy connects to a new `vox serve` daemon. One audio queue, no file locking needed.
-
-**Complications**:
-
-- **Audio serialization moves from flock to in-process queue.** The daemon replaces file-based locking (DES-013) with an in-process audio queue. This is strictly simpler — one queue, FIFO, no lock files, no cross-process coordination. But it's a behavioral change: currently, hooks (`notify.sh`, `notify-permission.sh`) call `vox play <path>` directly, acquiring the flock independently. With a daemon, these callers must either go through the daemon or the flock must coexist with the daemon's queue.
-- **Hook call path.** DES-017 establishes that hooks call CLI directly (~110ms, no LLM round-trip). The Stop hook calls `vox play chime.mp3`. If audio moves to the daemon, the `vox play` CLI command must forward to the daemon instead of playing directly. This changes the hook → CLI → direct-playback path to hook → CLI → daemon → playback. The CLI becomes a thin client to the daemon for playback commands.
-- **Per-session config.** Vox has per-project config (`.vox/config.md` with YAML frontmatter, DES-012). The daemon would need to know which session is asking for config to apply the right project settings. The proxy passes project directory at connection time alongside session identity.
-- **Notification architecture.** DES-001 uses a Stop hook with `decision: "block"` to force a spoken summary. The hook reads `.vox/tts.local.md` for config state. This is all shell-side and doesn't touch the MCP server — it calls `vox` CLI. The daemon change doesn't affect this path as long as the CLI forwards to the daemon.
-- **Provider API clients.** ElevenLabs, Polly, and OpenAI clients are currently instantiated per session. Sharing them via a daemon saves connection setup time but requires thread-safe access.
+- **Audio queue replaces flock.** Daemon manages one in-process FIFO queue — strictly simpler than file locking. But hooks (`notify.sh`, `notify-permission.sh`) currently call `vox play` directly. The CLI must forward to the daemon for playback.
+- **Hook call path change.** DES-017: hooks call CLI directly (~110ms). Path becomes hook → CLI → daemon → playback instead of hook → CLI → direct playback.
+- **Per-session config.** `.vox/config.md` is per-project. Proxy passes project directory at connection time.
 
 ### Lux (`lux display` + `lux serve`)
 
-**Daemon**: The display server (`lux display`) already exists as a persistent Unix socket server. The MCP server (`lux serve`) is separate — spawned per session, connects to the display socket.
+Display server already exists as a persistent Unix socket server (length-prefixed JSON, DES-002/003). MCP server (`lux serve`) is per-session, bridging MCP to the display protocol.
 
-**Current model**: Each session spawns `lux serve` (stdio MCP), which connects to the shared `lux display` Unix socket. The display server is already centralized.
+**Complications:**
 
-**Proxy model**: Proxy connects to a Lux daemon that bridges MCP to the display protocol.
-
-**Complications**:
-
-- **Protocol mismatch.** The display server speaks its own length-prefixed JSON protocol (DES-003), not MCP JSON-RPC. The proxy cannot forward MCP directly to the display socket. Options: (a) add a WebSocket/socket MCP endpoint to `lux serve` so it becomes the daemon, bridging MCP JSON-RPC to the display's native protocol, (b) add MCP support directly to the display server. Option (a) is more natural — `lux serve` already does this translation, it just needs to become a persistent shared process instead of per-session.
-- **Bidirectional events.** The display sends interaction events (button clicks, slider changes) back to the client. In MCP, the client (Claude) calls `recv()` to poll for events. With a persistent connection (Options B/C), the daemon can push events to the correct proxy immediately — the proxy writes them as MCP responses or notifications. This eliminates the `recv()` polling pattern entirely if events become push-based.
-- **Scene ownership.** Multiple sessions may want to show content on the display simultaneously. The display uses tabs to separate content (DES-005 element vocabulary includes `tab_bar`). Session identity from the proxy could auto-scope each session's content to its own tab.
-- **Socket discovery.** Lux uses `$XDG_RUNTIME_DIR/lux/display.sock` with fallbacks (DES-002). The daemon (whether `lux serve` or an extended `lux display`) must advertise its MCP endpoint. A known port or socket path in the same XDG directory works.
-- **`recv()` blocking.** The `recv` MCP tool blocks waiting for user interaction events. With a persistent connection, this is a standard async pattern — the daemon holds the pending `tools/call` response until an event arrives or the timeout expires. Cleaner than the current synchronous poll.
+- **Protocol mismatch.** Display server speaks its own protocol, not MCP JSON-RPC. `lux serve` becomes the shared daemon, bridging MCP to the display's native protocol.
+- **Bidirectional events.** Display pushes interaction events (clicks, slider changes). With persistent connection, daemon pushes to the correct proxy immediately — eliminates `recv()` polling.
+- **Scene ownership.** Multiple sessions showing content simultaneously. Session identity auto-scopes content to per-session tabs.
 
 ## Install Impact
 
-Current install scripts (`install.sh` for quarry, biff, vox) follow this pattern:
+Current `install.sh` pattern: check prerequisites → install uv → install Python → `uv tool install` → register plugin.
 
-1. Check prerequisites (claude CLI, git)
-2. Install uv (Python package manager)
-3. Install Python 3.13+
-4. `uv tool install` the Python package
-5. Register the Claude Code plugin via marketplace
-
-With mcp-proxy, the install script gains one additional step: download the mcp-proxy binary for the current platform. This is a ~5MB static binary — a single `curl` to a GitHub release asset, placed on `$PATH`.
+**New step:** Download the mcp-proxy binary (~5MB static binary):
 
 ```sh
-# New step in install.sh (between step 4 and 5):
-info "Installing mcp-proxy..."
 ARCH=$(uname -m)
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 curl -fsSL "https://github.com/punt-labs/mcp-proxy/releases/latest/download/mcp-proxy-${OS}-${ARCH}" \
   -o "$HOME/.local/bin/mcp-proxy"
 chmod +x "$HOME/.local/bin/mcp-proxy"
-ok "mcp-proxy installed"
 ```
 
-### Daemon Lifecycle
+**Plugin registration** changes from `{"command": "quarry", "args": ["mcp"]}` to `{"command": "mcp-proxy", "args": ["ws://localhost:8080/mcp"]}`. Breaking change — install script must detect and replace old registrations.
 
-The install script must also ensure the daemon is running (or instruct the user to start it). Options:
+**Daemon lifecycle** options: explicit start (user runs `quarry serve`), launchd/systemd service (auto-start on login), or on-demand via proxy (proxy starts daemon if missing — violates goal 6 but improves UX).
 
-- **Explicit start**: The install script prints "Run `quarry serve` to start the daemon" — simple, manual.
-- **Launchd/systemd service**: The install script registers a launch agent/service file for the daemon. Auto-starts on login. More complex but zero-touch.
-- **On-demand via proxy**: The proxy could start the daemon if it's not running. This couples the proxy to the daemon lifecycle (violating goal 6) but improves UX.
-
-### Plugin Registration
-
-The plugin.json `mcpServers` entry changes from:
-
-```json
-{"type": "stdio", "command": "quarry", "args": ["mcp"]}
-```
-
-to:
-
-```json
-{"type": "stdio", "command": "mcp-proxy", "args": ["ws://localhost:8080/mcp"]}
-```
-
-This is a breaking change for existing installs. The install script must handle the upgrade path — detect the old registration and replace it.
-
-### Shared Binary
-
-mcp-proxy becomes a shared dependency across the org, similar to `uv` today. Every project's `install.sh` downloads the same binary. The version can be pinned per-project (in `install.sh`) or always-latest. A version mismatch between proxy and daemon should not break the protocol — the wire format (JSON-RPC) is stable.
+**Shared binary.** mcp-proxy becomes a cross-org dependency like `uv`. Every project downloads the same binary. Wire format (JSON-RPC) is stable across versions.
 
 ## Build & Release
 
 ```sh
-# Build for current platform
 go build -o mcp-proxy .
 
-# Cross-compile for all targets
 GOOS=darwin  GOARCH=arm64 go build -o dist/mcp-proxy-darwin-arm64 .
 GOOS=darwin  GOARCH=amd64 go build -o dist/mcp-proxy-darwin-amd64 .
 GOOS=linux   GOARCH=arm64 go build -o dist/mcp-proxy-linux-arm64  .
 GOOS=linux   GOARCH=amd64 go build -o dist/mcp-proxy-linux-amd64  .
 ```
 
-Release artifacts are GitHub release assets. Each project's `install.sh` downloads the correct binary by platform.
-
 ## Open Questions
 
-1. **Transport decision.** HTTP, raw Unix socket, or WebSocket? See [Transport Options](#transport-options). Leaning WebSocket. To be revisited.
-
-2. **Daemon auto-start.** Should the proxy start the daemon if it's not running, or is that always the user's/system's responsibility?
-
-3. **Graceful degradation.** If the daemon is down, should the proxy fall back to spawning a full in-process server (i.e., degrade to Model 1), or fail fast with a clear error?
-
-4. **Lux daemon identity.** Should `lux serve` become the shared MCP daemon (bridging to the display socket), or should MCP support be added directly to the display server?
-
-5. **Hook CLI commands.** Vox and Lux hooks call CLI commands directly (e.g., `vox play`, `lux hook post-bash`). Should these CLI commands forward to the daemon, or continue to work independently? If they forward, the daemon must also handle non-MCP requests from CLI callers.
-
-6. **WebSocket over Unix socket vs TCP.** If WebSocket is chosen, should daemons listen on a Unix socket (lowest latency, no port conflicts) or TCP localhost (simpler configuration, standard URLs)? Both work — the proxy library supports custom dialers.
+1. **Transport decision.** HTTP, raw Unix socket, or WebSocket? Leaning WebSocket. To be revisited.
+2. **Daemon auto-start.** Proxy starts daemon if missing, or always user's responsibility?
+3. **Graceful degradation.** Daemon down → fall back to Model 1 (full in-process server), or fail fast?
+4. **Lux daemon identity.** `lux serve` becomes the shared daemon, or MCP added to display server directly?
+5. **Hook CLI forwarding.** `vox play` and `lux hook post-bash` — forward to daemon, or work independently?
+6. **WebSocket over Unix socket vs TCP.** If WebSocket: Unix socket (lowest latency, no port conflicts) or TCP localhost (simpler URLs)?
 
 ## Prior Art
 
-### Beads (steveyegge/beads)
+### SageOx (sageox/ox) — closest match
 
-Go CLI (`bd`, 92.9% of codebase) with a Python MCP server (`beads-mcp`) that acts as a stateless subprocess wrapper — each MCP tool call invokes `bd` with `--json` output, no persistent connection.
+Go CLI (97.8%), **shipped per-workspace daemon** with NDJSON over Unix domain socket. The most relevant prior art.
 
-**Had a daemon, deleted it.** v0.51.0 removed the daemon, RPC layer, JSONL sync pipeline, SQLite backend, and 3-way merge engine — ~70K+ lines deleted. Replaced with [Dolt](https://github.com/dolthub/dolt), a versioned MySQL-compatible database. Multi-writer is handled natively by Dolt's MySQL protocol. No custom daemon needed.
+**Architecture:** `ox daemon start` launches a background Go process. Clients connect over Unix socket, send one JSON object per line (NDJSON), get one response. 18+ message types: status, sync, heartbeat (one-way), checkout (streaming progress), telemetry, agent instance tracking.
 
-**Lesson:** If your shared state lives in a database with native multi-writer support, you don't need a daemon. Beads pushed the concurrency problem into the storage layer. Their MCP server became the simplest possible architecture: a stateless CLI wrapper.
-
-**Why this doesn't apply to us:** Quarry's LanceDB has no multi-writer protocol. Biff needs persistent push notifications (not request-response). Vox needs a shared audio queue with serialized playback. Lux needs bidirectional event streams. These require persistent connections and server push — exactly what beads was able to avoid by moving to Dolt.
-
-**Warning:** Beads found their daemon complex enough to delete 24K lines of it. Keep our daemon surface area small.
-
-Sources: [GitHub](https://github.com/steveyegge/beads), [DeepWiki](https://deepwiki.com/steveyegge/beads), [vscode-beads #65](https://github.com/jdillon/vscode-beads/issues/65)
-
-### Entire.io (entireio/cli)
-
-Go CLI (`entire`, 3.5K stars) — no daemon, no MCP server. Session provenance capture via git hooks.
-
-**Architecture:** When an AI agent commits, entire's git hook fires synchronously, captures the session transcript (prompts, responses, file modifications), and stores checkpoints on a separate branch (`entire/checkpoints/v1`). Never touches the active branch. Multi-session handled by unique session IDs (`YYYY-MM-DD-<UUID>`). Claude Code plugin is a thin command wrapper (`/entire:explain` → `entire explain --commit SHA`).
-
-**Lesson:** Stateless CLI + git hooks is sufficient when shared state lives in the filesystem (git). No daemon, no MCP server, no persistent connections.
-
-**Why this doesn't apply to us:** Entire solves provenance capture (write-heavy, no concurrent reads of expensive state). Our projects have shared resources that must be held in memory (ML models, NATS connections, audio queues, display servers) — these can't be loaded from disk on every invocation.
-
-Sources: [GitHub](https://github.com/entireio/cli), [Claude plugin](https://github.com/entireio/claude-plugins)
-
-### SageOx (sageox/ox)
-
-Go CLI (`ox`, 97.8% of codebase) — **has a daemon**, shipped and running in production. This is the closest prior art to what we're building.
-
-**Architecture:** `ox daemon start` launches a background Go process per workspace. Clients (CLI commands, agent hooks) connect to the daemon over a **Unix domain socket** using **NDJSON** (newline-delimited JSON — one JSON object per line, `\n` terminated). The daemon handles ledger sync, team context management, code indexing, telemetry, and agent session tracking.
-
-**IPC Protocol — NDJSON over Unix Socket:**
+**IPC protocol:**
 
 ```text
-Client → Daemon:  {"type":"status"}\n
-Daemon → Client:  {"success":true,"data":{...}}\n
-
-Client → Daemon:  {"type":"heartbeat","payload":{...}}\n
-                  (one-way, no response)
+Client → Daemon:  {"type":"ping"}\n
+Daemon → Client:  {"success":true}\n
 
 Client → Daemon:  {"type":"checkout","payload":{...}}\n
-Daemon → Client:  {"progress":{"stage":"cloning","percent":30,"message":"..."}}\n
-Daemon → Client:  {"progress":{"stage":"verifying","percent":90,"message":"..."}}\n
+Daemon → Client:  {"progress":{"stage":"cloning","percent":30}}\n
 Daemon → Client:  {"success":true,"data":{...}}\n
-                  (streaming progress, then final response)
 ```
 
-They explicitly chose NDJSON over length-prefix framing (and documented why):
+Chose NDJSON over length-prefix for debuggability: `echo '{"type":"ping"}' | socat - UNIX:/path/sock` works. Can't do that with length-prefix or WebSocket.
 
-> We use NDJSON instead of length-prefix framing because: debuggable with standard Unix tools (cat, socat, jq work directly), human-readable on the wire, JSON encoding handles embedded newlines automatically (`\n` → `\\n`). Length-prefix framing breaks `echo '{"type":"ping"}' | socat - UNIX:/path/sock` debugging.
+**Session tracking:** Heartbeat-based. Agents send `{"type":"heartbeat","payload":{"agent_id":"Oxa7b3"}}`. Daemon tracks instances (last heartbeat, active/idle status, context tokens consumed). No process tree walking.
 
-**Message types (18+):** `status`, `sync`, `team_sync`, `ping`, `stop`, `version`, `sync_history`, `heartbeat` (one-way), `checkout` (streaming progress), `telemetry` (one-way), `friction` (one-way), `get_errors`, `mark_errors`, `sessions` (deprecated), `instances`, `doctor`, `trigger_gc`, `code_index` (streaming progress), `code_status`.
+**Daemon lifecycle:** Per-workspace scope. Inactivity auto-exit. Restart loop detection (exponential backoff 5s→2min). Liveness via socket ping (not PID file). Socket mode 0600 (owner-only). Max 100 concurrent connections.
 
-**Session identity — heartbeat-based:**
+**What they got right:** NDJSON debuggability. Per-workspace scoping. Heartbeat session tracking. Inactivity timeout. `NeedsHelp` pattern (daemon flags issues for LLM reasoning).
 
-Agents send periodic heartbeat messages with an `agent_id`. The daemon tracks active instances:
+**The push gap:** SageOx is request-response only — no persistent connections where the daemon pushes unsolicited messages. Works for sync status, but wouldn't work for biff's `tools/list_changed` or lux's interaction events. Their streaming progress (multiple lines on one connection) is the closest, but still client-initiated.
 
-```go
-type InstanceInfo struct {
-    AgentID                 string    // e.g., "Oxa7b3"
-    WorkspacePath           string    // workspace the agent is in
-    LastHeartbeat           time.Time // when last heartbeat received
-    HeartbeatCount          int       // total heartbeats from this agent
-    Status                  string    // "active" or "idle"
-    CumulativeContextTokens int64     // tokens consumed from ox commands
-    CommandCount            int       // ox commands executed
-}
-```
-
-No process tree walking. The agent identifies itself; the daemon tracks who's alive. An `instances` IPC message returns all active agents for the workspace.
-
-**Daemon lifecycle:**
-
-| Feature | Implementation |
-|---------|---------------|
-| Scope | One daemon per workspace (keyed by project root) |
-| Auto-exit | Inactivity timeout (configurable, checks periodically) |
-| Restart loop detection | Exponential backoff: 5s→10s→20s→...→2min, tracked in `daemon-restarts.json` |
-| Liveness check | Socket ping (100ms timeout), not PID file — PID is secondary safety net |
-| Multi-daemon | `ox daemon list` shows all running daemons across workspaces |
-| Process management | Claude Code manages daemon lifecycle (start/kill) |
-| Connection limits | Max 100 concurrent connections, 1MB max message size |
-| Security | Socket mode 0600, parent dir mode 0700 (owner-only) |
-| Progress streaming | Long operations (checkout, code_index) send multiple progress lines before final response |
-
-**What they got right:**
-
-- NDJSON is more debuggable than length-prefix or WebSocket frames. You can test the daemon with `socat`.
-- Per-workspace daemons avoid the "one daemon serves everything" complexity. Each daemon has a focused scope.
-- Heartbeat-based session tracking is simpler and more reliable than process tree walking.
-- Inactivity timeout prevents zombie daemons — if no agent is using it, the daemon exits.
-- The `NeedsHelp` pattern is clever: the daemon flags issues it can't solve deterministically, and the LLM inspects them. The daemon doesn't try to be smart about everything.
-
-**Key differences from our design:**
-
-| Aspect | SageOx | mcp-proxy |
-|--------|--------|-----------|
-| Daemon role | Separate IPC service; CLI talks to it | Daemon *is* the MCP server; proxy bridges stdio↔daemon |
-| MCP integration | None — daemon is not an MCP server | Daemon speaks MCP JSON-RPC natively |
-| Transport | NDJSON over Unix socket (custom protocol) | Under evaluation: HTTP, Unix socket, or WebSocket |
-| Push notifications | Not needed (CLI polls daemon) | Required (biff `tools/list_changed`, lux interaction events) |
-| Session identity | Heartbeat with `agent_id` | Process tree walk for Claude PID (to be replaced) |
-| Proxy layer | No proxy — CLI connects directly | Go proxy bridges stdio ↔ daemon |
-
-**The push notification gap:** SageOx's daemon is request-response only — clients connect, send a message, get a response, disconnect. There's no persistent connection where the daemon pushes unsolicited messages to a client. This works for their use case (sync status, code indexing) but wouldn't work for biff (`tools/list_changed` must push to a specific session) or lux (interaction events). The streaming progress pattern (multiple lines on one connection) is the closest they get, but it's still initiated by the client.
-
-**Implications for our transport decision:** SageOx validates Unix socket + NDJSON as a production-ready IPC choice for Go daemons. But their request-response model doesn't solve our push requirement. WebSocket adds push capability on top of the same local-socket foundation. The question is whether the debuggability advantage of raw NDJSON (socat-friendly) outweighs WebSocket's built-in framing and keepalive — or whether we can get both by running WebSocket over a Unix socket.
+**Key difference:** SageOx's daemon is a separate IPC service alongside the MCP server. Ours *is* the MCP server — the proxy bridges stdio to it.
 
 Sources: [GitHub](https://github.com/sageox/ox), [daemon.go](https://github.com/sageox/ox/blob/8553ad83/cmd/ox/daemon.go), [ipc.go](https://github.com/sageox/ox/blob/8553ad83/internal/daemon/ipc.go), [ipc_unix.go](https://github.com/sageox/ox/blob/8553ad83/internal/daemon/ipc_unix.go)
 
-### Common Pattern
+### Beads (steveyegge/beads) — daemon removed
 
-Beads and entire.io converged on **stateless CLI invocations, no daemon**. SageOx chose a **per-workspace daemon with NDJSON over Unix socket**. The dividing line is whether shared state must be held in memory:
+Go CLI (92.9%) with Python MCP server (stateless CLI wrapper). **Had a daemon, deleted it in v0.51.0** — removed ~70K lines (daemon, RPC, SQLite, JSONL sync, 3-way merge). Replaced with [Dolt](https://github.com/dolthub/dolt) (versioned MySQL-compatible database) for native multi-writer.
+
+**Lesson:** If shared state lives in a database with native multi-writer support, you don't need a daemon. **Warning:** They found their daemon complex enough to delete 24K lines of it. Keep ours small.
+
+**Why this doesn't apply:** Our shared state (ML models, NATS connections, audio queues, display servers) can't live in a database.
+
+Sources: [GitHub](https://github.com/steveyegge/beads), [vscode-beads #65](https://github.com/jdillon/vscode-beads/issues/65)
+
+### Entire.io (entireio/cli) — no daemon
+
+Go CLI (97.8%, 3.5K stars). Session provenance capture via git hooks. Stores checkpoints on a separate branch (`entire/checkpoints/v1`). No daemon, no MCP server. Stateless CLI + filesystem.
+
+**Why this doesn't apply:** Solves write-heavy provenance, not concurrent reads of expensive in-memory state.
+
+Sources: [GitHub](https://github.com/entireio/cli), [Claude plugin](https://github.com/entireio/claude-plugins)
+
+### When is a daemon necessary?
 
 | Project | Shared State | Lives In | Daemon? |
 |---------|-------------|----------|---------|
-| Beads | Issue graph | Dolt (MySQL protocol) | Removed — database handles multi-writer |
-| Entire.io | Session transcripts | Git (filesystem) | Never had one — git handles concurrency |
-| SageOx | Sync state, team context, code index | In-memory + filesystem | Yes — daemon coordinates sync, tracks agents |
-| Quarry | LanceDB index + embedding model | In-memory | Needed — ~200MB per session without sharing |
-| Biff | NATS connection + per-session state | In-memory + NATS | Needed — push notifications require persistent connection |
-| Vox | Audio queue + provider clients | In-memory | Needed — serialized playback requires single queue |
-| Lux | Display server + scene state | In-memory (ImGui) | Already exists — Unix socket to display process |
+| Beads | Issue graph | Dolt (MySQL) | Removed — database handles multi-writer |
+| Entire.io | Session transcripts | Git (filesystem) | Never had one |
+| SageOx | Sync state, code index | In-memory + filesystem | Yes — coordinates sync, tracks agents |
+| **Quarry** | LanceDB + embedding model | In-memory | **Needed** — ~200MB per session without sharing |
+| **Biff** | NATS connection + session state | In-memory + NATS | **Needed** — push notifications require persistent connection |
+| **Vox** | Audio queue + provider clients | In-memory | **Needed** — serialized playback requires single queue |
+| **Lux** | Display server + scene state | In-memory (ImGui) | **Already exists** — Unix socket to display |
 
-The daemon is necessary when the cost of loading state per-invocation is prohibitive, or when the system requires server-initiated push. Our projects have both constraints.
+A daemon is necessary when per-invocation state loading is prohibitive, or the system requires server-initiated push. Our projects have both constraints.
