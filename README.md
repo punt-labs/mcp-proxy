@@ -339,7 +339,34 @@ Release artifacts are GitHub release assets. Each project's `install.sh` downloa
 
 6. **WebSocket over Unix socket vs TCP.** If WebSocket is chosen, should daemons listen on a Unix socket (lowest latency, no port conflicts) or TCP localhost (simpler configuration, standard URLs)? Both work — the proxy library supports custom dialers.
 
-## Prior Art to Research
+## Prior Art
 
-- **Beads.** The beads project moved away from a daemon architecture to something else. Research what they changed to and why — the lessons learned may directly apply. Believed to be Go-based.
-- **Entire.io.** Check their approach to MCP server architecture and proxy/daemon patterns. Also believed to use Go. Their "provenance gap" work (reason-trace lineage) may have solved similar multi-session coordination problems.
+### Beads (steveyegge/beads)
+
+Go CLI (`bd`, 92.9% of codebase) with a Python MCP server (`beads-mcp`) that acts as a stateless subprocess wrapper — each MCP tool call invokes `bd` with `--json` output, no persistent connection.
+
+**Had a daemon, deleted it.** v0.51.0 removed the daemon, RPC layer, JSONL sync pipeline, SQLite backend, and 3-way merge engine — ~70K+ lines deleted. Replaced with [Dolt](https://github.com/dolthub/dolt), a versioned MySQL-compatible database. Multi-writer is handled natively by Dolt's MySQL protocol. No custom daemon needed.
+
+**Lesson:** If your shared state lives in a database with native multi-writer support, you don't need a daemon. Beads pushed the concurrency problem into the storage layer. Their MCP server became the simplest possible architecture: a stateless CLI wrapper.
+
+**Why this doesn't apply to us:** Quarry's LanceDB has no multi-writer protocol. Biff needs persistent push notifications (not request-response). Vox needs a shared audio queue with serialized playback. Lux needs bidirectional event streams. These require persistent connections and server push — exactly what beads was able to avoid by moving to Dolt.
+
+**Warning:** Beads found their daemon complex enough to delete 24K lines of it. Keep our daemon surface area small.
+
+Sources: [GitHub](https://github.com/steveyegge/beads), [DeepWiki](https://deepwiki.com/steveyegge/beads), [vscode-beads #65](https://github.com/jdillon/vscode-beads/issues/65)
+
+### Entire.io (entireio/cli)
+
+Go CLI (`entire`, 3.5K stars) — no daemon, no MCP server. Session provenance capture via git hooks.
+
+**Architecture:** When an AI agent commits, entire's git hook fires synchronously, captures the session transcript (prompts, responses, file modifications), and stores checkpoints on a separate branch (`entire/checkpoints/v1`). Never touches the active branch. Multi-session handled by unique session IDs (`YYYY-MM-DD-<UUID>`). Claude Code plugin is a thin command wrapper (`/entire:explain` → `entire explain --commit SHA`).
+
+**Lesson:** Stateless CLI + git hooks is sufficient when shared state lives in the filesystem (git). No daemon, no MCP server, no persistent connections.
+
+**Why this doesn't apply to us:** Entire solves provenance capture (write-heavy, no concurrent reads of expensive state). Our projects have shared resources that must be held in memory (ML models, NATS connections, audio queues, display servers) — these can't be loaded from disk on every invocation.
+
+Sources: [GitHub](https://github.com/entireio/cli), [Claude plugin](https://github.com/entireio/claude-plugins)
+
+### Common Pattern
+
+Both beads and entire.io converged on **stateless CLI invocations, no daemon**. But both solved problems where shared state lives naturally in a database (Dolt) or filesystem (git). Our projects have shared state that doesn't fit that model — a live NATS connection, a loaded ML model, an audio output device, a display server. The daemon (or persistent server process) is necessary when the cost of loading state per-invocation is prohibitive.
