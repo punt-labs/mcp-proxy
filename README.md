@@ -367,6 +367,103 @@ Go CLI (`entire`, 3.5K stars) — no daemon, no MCP server. Session provenance c
 
 Sources: [GitHub](https://github.com/entireio/cli), [Claude plugin](https://github.com/entireio/claude-plugins)
 
+### SageOx (sageox/ox)
+
+Go CLI (`ox`, 97.8% of codebase) — **has a daemon**, shipped and running in production. This is the closest prior art to what we're building.
+
+**Architecture:** `ox daemon start` launches a background Go process per workspace. Clients (CLI commands, agent hooks) connect to the daemon over a **Unix domain socket** using **NDJSON** (newline-delimited JSON — one JSON object per line, `\n` terminated). The daemon handles ledger sync, team context management, code indexing, telemetry, and agent session tracking.
+
+**IPC Protocol — NDJSON over Unix Socket:**
+
+```text
+Client → Daemon:  {"type":"status"}\n
+Daemon → Client:  {"success":true,"data":{...}}\n
+
+Client → Daemon:  {"type":"heartbeat","payload":{...}}\n
+                  (one-way, no response)
+
+Client → Daemon:  {"type":"checkout","payload":{...}}\n
+Daemon → Client:  {"progress":{"stage":"cloning","percent":30,"message":"..."}}\n
+Daemon → Client:  {"progress":{"stage":"verifying","percent":90,"message":"..."}}\n
+Daemon → Client:  {"success":true,"data":{...}}\n
+                  (streaming progress, then final response)
+```
+
+They explicitly chose NDJSON over length-prefix framing (and documented why):
+
+> We use NDJSON instead of length-prefix framing because: debuggable with standard Unix tools (cat, socat, jq work directly), human-readable on the wire, JSON encoding handles embedded newlines automatically (`\n` → `\\n`). Length-prefix framing breaks `echo '{"type":"ping"}' | socat - UNIX:/path/sock` debugging.
+
+**Message types (18+):** `status`, `sync`, `team_sync`, `ping`, `stop`, `version`, `sync_history`, `heartbeat` (one-way), `checkout` (streaming progress), `telemetry` (one-way), `friction` (one-way), `get_errors`, `mark_errors`, `sessions` (deprecated), `instances`, `doctor`, `trigger_gc`, `code_index` (streaming progress), `code_status`.
+
+**Session identity — heartbeat-based:**
+
+Agents send periodic heartbeat messages with an `agent_id`. The daemon tracks active instances:
+
+```go
+type InstanceInfo struct {
+    AgentID                 string    // e.g., "Oxa7b3"
+    WorkspacePath           string    // workspace the agent is in
+    LastHeartbeat           time.Time // when last heartbeat received
+    HeartbeatCount          int       // total heartbeats from this agent
+    Status                  string    // "active" or "idle"
+    CumulativeContextTokens int64     // tokens consumed from ox commands
+    CommandCount            int       // ox commands executed
+}
+```
+
+No process tree walking. The agent identifies itself; the daemon tracks who's alive. An `instances` IPC message returns all active agents for the workspace.
+
+**Daemon lifecycle:**
+
+| Feature | Implementation |
+|---------|---------------|
+| Scope | One daemon per workspace (keyed by project root) |
+| Auto-exit | Inactivity timeout (configurable, checks periodically) |
+| Restart loop detection | Exponential backoff: 5s→10s→20s→...→2min, tracked in `daemon-restarts.json` |
+| Liveness check | Socket ping (100ms timeout), not PID file — PID is secondary safety net |
+| Multi-daemon | `ox daemon list` shows all running daemons across workspaces |
+| Process management | Claude Code manages daemon lifecycle (start/kill) |
+| Connection limits | Max 100 concurrent connections, 1MB max message size |
+| Security | Socket mode 0600, parent dir mode 0700 (owner-only) |
+| Progress streaming | Long operations (checkout, code_index) send multiple progress lines before final response |
+
+**What they got right:**
+
+- NDJSON is more debuggable than length-prefix or WebSocket frames. You can test the daemon with `socat`.
+- Per-workspace daemons avoid the "one daemon serves everything" complexity. Each daemon has a focused scope.
+- Heartbeat-based session tracking is simpler and more reliable than process tree walking.
+- Inactivity timeout prevents zombie daemons — if no agent is using it, the daemon exits.
+- The `NeedsHelp` pattern is clever: the daemon flags issues it can't solve deterministically, and the LLM inspects them. The daemon doesn't try to be smart about everything.
+
+**Key differences from our design:**
+
+| Aspect | SageOx | mcp-proxy |
+|--------|--------|-----------|
+| Daemon role | Separate IPC service; CLI talks to it | Daemon *is* the MCP server; proxy bridges stdio↔daemon |
+| MCP integration | None — daemon is not an MCP server | Daemon speaks MCP JSON-RPC natively |
+| Transport | NDJSON over Unix socket (custom protocol) | Under evaluation: HTTP, Unix socket, or WebSocket |
+| Push notifications | Not needed (CLI polls daemon) | Required (biff `tools/list_changed`, lux interaction events) |
+| Session identity | Heartbeat with `agent_id` | Process tree walk for Claude PID (to be replaced) |
+| Proxy layer | No proxy — CLI connects directly | Go proxy bridges stdio ↔ daemon |
+
+**The push notification gap:** SageOx's daemon is request-response only — clients connect, send a message, get a response, disconnect. There's no persistent connection where the daemon pushes unsolicited messages to a client. This works for their use case (sync status, code indexing) but wouldn't work for biff (`tools/list_changed` must push to a specific session) or lux (interaction events). The streaming progress pattern (multiple lines on one connection) is the closest they get, but it's still initiated by the client.
+
+**Implications for our transport decision:** SageOx validates Unix socket + NDJSON as a production-ready IPC choice for Go daemons. But their request-response model doesn't solve our push requirement. WebSocket adds push capability on top of the same local-socket foundation. The question is whether the debuggability advantage of raw NDJSON (socat-friendly) outweighs WebSocket's built-in framing and keepalive — or whether we can get both by running WebSocket over a Unix socket.
+
+Sources: [GitHub](https://github.com/sageox/ox), [daemon.go](https://github.com/sageox/ox/blob/8553ad83/cmd/ox/daemon.go), [ipc.go](https://github.com/sageox/ox/blob/8553ad83/internal/daemon/ipc.go), [ipc_unix.go](https://github.com/sageox/ox/blob/8553ad83/internal/daemon/ipc_unix.go)
+
 ### Common Pattern
 
-Both beads and entire.io converged on **stateless CLI invocations, no daemon**. But both solved problems where shared state lives naturally in a database (Dolt) or filesystem (git). Our projects have shared state that doesn't fit that model — a live NATS connection, a loaded ML model, an audio output device, a display server. The daemon (or persistent server process) is necessary when the cost of loading state per-invocation is prohibitive.
+Beads and entire.io converged on **stateless CLI invocations, no daemon**. SageOx chose a **per-workspace daemon with NDJSON over Unix socket**. The dividing line is whether shared state must be held in memory:
+
+| Project | Shared State | Lives In | Daemon? |
+|---------|-------------|----------|---------|
+| Beads | Issue graph | Dolt (MySQL protocol) | Removed — database handles multi-writer |
+| Entire.io | Session transcripts | Git (filesystem) | Never had one — git handles concurrency |
+| SageOx | Sync state, team context, code index | In-memory + filesystem | Yes — daemon coordinates sync, tracks agents |
+| Quarry | LanceDB index + embedding model | In-memory | Needed — ~200MB per session without sharing |
+| Biff | NATS connection + per-session state | In-memory + NATS | Needed — push notifications require persistent connection |
+| Vox | Audio queue + provider clients | In-memory | Needed — serialized playback requires single queue |
+| Lux | Display server + scene state | In-memory (ImGui) | Already exists — Unix socket to display process |
+
+The daemon is necessary when the cost of loading state per-invocation is prohibitive, or when the system requires server-initiated push. Our projects have both constraints.
