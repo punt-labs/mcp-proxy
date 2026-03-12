@@ -21,6 +21,19 @@ Claude Code ◄──────────────► mcp-proxy ◄──
 
 The proxy is transparent — it doesn't parse, validate, or transform JSON-RPC messages. Messages are opaque byte sequences forwarded without modification.
 
+### Package Map
+
+| Package | What It Does |
+|---------|-------------|
+| `main` | Entry point: parse args, dial, bridge, signal handling |
+| `internal/bridge` | Bidirectional stdin↔WebSocket forwarding (two goroutines + WaitGroup) |
+| `internal/transport` | WebSocket dial with typed errors, session key injection, bearer token auth |
+| `internal/session` | Process-tree walking to resolve Claude Code session key |
+| `internal/debuglog` | Structured `slog` debug logging via `MCP_PROXY_DEBUG` env var |
+| `internal/testutil` | Mock daemon (`httptest.Server` + WebSocket), stdio pipe helpers |
+| `internal/e2e` | Black-box binary tests (build tag `e2e`) |
+| `internal/integration` | Real daemon roundtrip tests (build tag `integration`) |
+
 ---
 
 ## DES-001: Transport — WebSocket
@@ -104,9 +117,20 @@ Either goroutine cancels the shared context on completion or error. `sync.Mutex`
 
 ### Shutdown Sequence
 
-1. stdin reaches EOF → scanner goroutine calls `conn.Close(StatusNormalClosure)` and cancels context
-2. Reader goroutine sees close frame or context cancellation → exits
+**Stdin EOF (clean):**
+1. Scanner goroutine reaches EOF → cancels context
+2. Reader goroutine sees context cancellation → exits, closes stdin (unblocks scanner if stuck)
 3. WaitGroup completes → `Run()` returns nil
+
+**Daemon disconnect:**
+1. Reader goroutine gets WebSocket error → cancels context, closes stdin
+2. Scanner goroutine sees write error or stdin close → exits
+3. WaitGroup completes → `Run()` returns daemon error
+
+**Signal (SIGINT/SIGTERM):**
+1. `main.go` cancels context via `signal.NotifyContext`
+2. Both goroutines see context cancellation → exit
+3. Second signal force-exits via `forceExitOnSecondSignal` goroutine
 
 ### Race Safety
 
@@ -160,6 +184,93 @@ Individual daemon projects may add auto-start logic to their own installers or l
 
 ---
 
+## DES-006: Debug Logging — File-Only via MCP_PROXY_DEBUG
+
+**Date:** 2026-03-11
+**Status:** SETTLED
+**Topic:** How the proxy exposes diagnostic information
+
+### Design
+
+Debug logging is off by default and controlled by `MCP_PROXY_DEBUG`:
+
+| Value | Behavior |
+|-------|----------|
+| unset / empty | No logging (nop logger, zero-cost calls) |
+| `1` or `true` | Log to `$TMPDIR/mcp-proxy-<pid>.log` |
+| any other value | Treated as file path |
+
+Uses `slog.Logger` with `slog.LevelDebug`. All log entries include structured fields (message sizes, connection events, errors).
+
+### Why File-Only
+
+**Stdout is the data channel.** MCP JSON-RPC messages flow through stdout — any diagnostic output would corrupt the protocol stream. Stderr is also risky: some MCP clients capture stderr, and mixed diagnostics/error output is hard to parse.
+
+File logging provides clean separation: data on stdout, errors on stderr, diagnostics in a file.
+
+### Why slog
+
+`slog` is stdlib (Go 1.21+), structured, and has zero-cost disabled paths. The `Nop()` logger discards at the handler level, so disabled `logger.Debug()` calls don't allocate.
+
+### Test Logger
+
+`NewTestLogger(t)` writes to both `t.Log()` (visible with `-v`) and a captured buffer (for assertions). This avoids polluting test output while allowing tests to assert on log content.
+
+---
+
+## DES-007: Bearer Token Authentication — MCP_PROXY_TOKEN
+
+**Date:** 2026-03-12
+**Status:** SETTLED
+**Topic:** How the proxy authenticates with remote or secured daemons
+
+### Design
+
+If `MCP_PROXY_TOKEN` is set, the proxy sends `Authorization: Bearer <token>` on the WebSocket upgrade request. No token means no header.
+
+```bash
+MCP_PROXY_TOKEN=your-api-key mcp-proxy wss://remote-host/mcp
+```
+
+### Why Environment Variable
+
+MCP server configurations (`claude_desktop_config.json`, `plugin.json`) support `env` blocks for injecting environment variables, but have no mechanism for secrets in `args`. Environment variables are the standard channel for secrets in the MCP ecosystem.
+
+### Why Bearer
+
+Bearer tokens are the most common HTTP auth scheme for API keys. The header is set on the HTTP upgrade request (before WebSocket is established), which is the standard WebSocket authentication point.
+
+### Rejected: Multiple Auth Schemes
+
+Only Bearer is supported. Adding Basic, custom headers, or mTLS would increase surface area without evidence of demand. The proxy can add schemes later if needed — the current design doesn't preclude it.
+
+### Rejected: Config File
+
+A config file for a single env var would be over-engineering. If the proxy ever needs multiple config knobs, a file may make sense — but the current interface (one URL arg + two optional env vars) is sufficient.
+
+---
+
+## DES-008: Signal Handling — Double-Signal Pattern
+
+**Date:** 2026-03-11
+**Status:** SETTLED
+**Topic:** How the proxy handles SIGINT and SIGTERM
+
+### Design
+
+Two-phase signal handling:
+
+1. **First signal:** Cancels context via `signal.NotifyContext`. Bridge goroutines see cancellation and shut down gracefully (close WebSocket, drain pending writes).
+2. **Second signal:** `forceExitOnSecondSignal` goroutine calls `os.Exit(1)` immediately.
+
+### Why Two Phases
+
+Graceful shutdown matters: an abrupt exit can leave the daemon with a half-open WebSocket connection that won't be cleaned up until the keepalive timeout. But if graceful shutdown hangs (blocked on stdin read, unresponsive daemon), the user needs an escape hatch.
+
+This is the standard Go pattern — `kubectl`, `docker`, and most Go CLI tools use the same two-signal approach.
+
+---
+
 ## Target Daemon Migration Notes
 
 ### Quarry (`quarry serve`) — easiest migration
@@ -183,7 +294,7 @@ Individual daemon projects may add auto-start logic to their own installers or l
 - **Dynamic tool descriptions.** Per-session tool description mutation (unread count, talk partner). Persistent connection makes this natural — daemon knows which session is asking.
 - **Belt-and-suspenders simplification.** Current two-path notification design (tool-handler "belt" + background-poller "suspenders") collapses to one: poller → daemon → session connection → proxy → stdout.
 - **Session cleanup.** Currently deletes PPID file on shutdown. With persistent connection, cleanup triggers on proxy disconnect (detected via keepalive timeout).
-- **Session lifetime vs connection lifetime.** DES-008 requires 30-day session persistence. Session state persists in the relay (NATS KV / filesystem); the proxy connection is a transient delivery channel, not the session's lifetime.
+- **Session lifetime vs connection lifetime.** Biff's DES-008 requires 30-day session persistence. Session state persists in the relay (NATS KV / filesystem); the proxy connection is a transient delivery channel, not the session's lifetime.
 
 ### Vox (new daemon needed)
 
@@ -213,7 +324,7 @@ Display server already exists as a persistent Unix socket server (length-prefixe
 2. **Graceful degradation.** Daemon down → fall back to in-process server, or fail fast? (Currently: fail fast.)
 3. **Lux daemon identity.** `lux serve` becomes the shared daemon, or MCP added to display server directly?
 4. **Hook CLI forwarding.** `vox play` and `lux hook post-bash` — forward to daemon, or work independently?
-5. **WebSocket over Unix socket vs TCP.** Unix socket (lowest latency, no port conflicts) or TCP localhost (simpler URLs)? (Currently: TCP localhost.)
+5. ~~**WebSocket over Unix socket vs TCP.**~~ Settled by DES-001: WebSocket over TCP localhost. URLs are simpler (`ws://localhost:8420/mcp`), and TCP allows remote daemons (enabled by DES-007 bearer auth).
 
 ---
 
