@@ -72,7 +72,9 @@ func Dial(ctx context.Context, rawURL string, sessionKey int, logger *slog.Logge
 	dialCtx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
 
-	conn, _, err := websocket.Dial(dialCtx, u.String(), nil)
+	conn, _, err := websocket.Dial(dialCtx, u.String(), &websocket.DialOptions{
+		Subprotocols: []string{"mcp"},
+	})
 	if err != nil {
 		addr := u.Host
 

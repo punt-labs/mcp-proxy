@@ -11,7 +11,7 @@ This file serves as a record that the plan existed and was followed.
 | 1 | Bidirectional forwarding | Done |
 | 2 | CLI entry point + connection | Done |
 | 3 | Session identity | Done |
-| 4 | Real integration — Quarry | Not started (requires quarry WebSocket PR) |
+| 4 | Real integration — Quarry | Done |
 | 5 | Real integration — Biff (push) | Not started (requires biff WebSocket PR) |
 | 6 | Hardening | Partial (partition tests, boundary, exit timing) |
 | 7 | Release | Partial (release workflow, install docs; Homebrew tap pending) |
