@@ -119,16 +119,19 @@ Either goroutine cancels the shared context on completion or error. `sync.Mutex`
 ### Shutdown Sequence
 
 **Stdin EOF (clean):**
+
 1. Scanner goroutine reaches EOF → cancels context
 2. Reader goroutine sees context cancellation → exits, closes stdin (unblocks scanner if stuck)
 3. WaitGroup completes → `Run()` returns nil
 
 **Daemon disconnect:**
+
 1. Reader goroutine gets WebSocket error → cancels context, closes stdin
 2. Scanner goroutine sees write error or stdin close → exits
 3. WaitGroup completes → `Run()` returns daemon error
 
 **Signal (SIGINT/SIGTERM):**
+
 1. `main.go` cancels context via `signal.NotifyContext`
 2. Both goroutines see context cancellation → exit
 3. Second signal force-exits via `forceExitOnSecondSignal` goroutine
