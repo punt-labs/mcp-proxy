@@ -32,6 +32,15 @@ Optionally, the daemon can:
 - **Read `?session_key=<pid>`** from the WebSocket upgrade URL to maintain per-session state (e.g., separate database selections per Claude Code tab)
 - **Push server-initiated messages** (e.g., `notifications/tools/list_changed`) — the proxy forwards them to stdout immediately
 
+### Authentication
+
+The proxy does not add authentication headers to the WebSocket upgrade. If your daemon requires auth, it should either:
+
+- **Trust localhost connections** — appropriate when the daemon only binds to `127.0.0.1` (the default for most MCP servers)
+- **Use the session key** — the `?session_key=<pid>` query parameter can serve as a lightweight identity mechanism for local daemons
+
+Remote or multi-user deployments requiring bearer tokens or mTLS are not yet supported.
+
 ## Install
 
 ### Binary
