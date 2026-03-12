@@ -15,6 +15,32 @@ Claude Code ◄──────────────► mcp-proxy ◄──
 
 **Platforms:** macOS, Linux
 
+## Install
+
+### Homebrew (macOS)
+
+```bash
+brew install punt-labs/tap/mcp-proxy
+```
+
+### Go
+
+```bash
+go install github.com/punt-labs/mcp-proxy@latest
+```
+
+### Binary
+
+Download from [GitHub Releases](https://github.com/punt-labs/mcp-proxy/releases):
+
+```bash
+curl -fsSL https://github.com/punt-labs/mcp-proxy/releases/latest/download/mcp-proxy-darwin-arm64 -o mcp-proxy
+chmod +x mcp-proxy
+sudo mv mcp-proxy /usr/local/bin/
+```
+
+Replace `darwin-arm64` with your platform: `darwin-amd64`, `linux-arm64`, `linux-amd64`.
+
 ## Usage
 
 ```bash
@@ -88,7 +114,7 @@ go build -o mcp-proxy .
 Cross-compile for all platforms:
 
 ```bash
-make build-all    # Builds dist/mcp-proxy-{darwin,linux}-{arm64,amd64}
+make dist         # Builds dist/mcp-proxy-{darwin,linux}-{arm64,amd64}
 ```
 
 ## Development
