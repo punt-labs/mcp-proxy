@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Hook relay mode (`--hook`) for one-shot JSON-RPC calls from Claude Code hook scripts to the daemon
+- Async hook mode (`--hook --async`) for fire-and-forget notifications with graceful close
+- Dedicated `/hook` WebSocket endpoint (no MCP subprotocol, no initialize handshake)
 - Automatic reconnect with exponential backoff when daemon disconnects (250ms–5s)
 - Message preservation across reconnects — no messages lost during daemon restart
 - `--health` flag for liveness probes (`mcp-proxy --health ws://localhost:8420/mcp`)
