@@ -14,7 +14,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"sync"
 	"time"
 
 	"nhooyr.io/websocket"
@@ -146,9 +145,9 @@ func runConnection(
 	defer connCancel()
 
 	readerDone := make(chan error, 1)
-	var stdoutMu sync.Mutex
 
 	// Reader goroutine: daemon → stdout.
+	// Only this goroutine writes to stdout — no mutex needed.
 	go func() {
 		defer connCancel() // signal writer to stop on disconnect
 		for {
@@ -163,9 +162,7 @@ func runConnection(
 			}
 			logger.Debug("daemon→stdout", "size", len(msg))
 
-			stdoutMu.Lock()
 			_, writeErr := fmt.Fprintf(stdout, "%s\n", msg)
-			stdoutMu.Unlock()
 			if writeErr != nil {
 				readerDone <- fmt.Errorf("writing to stdout: %w", writeErr)
 				return
@@ -194,7 +191,10 @@ func runConnection(
 				// then wait for it to exit.
 				connCancel()
 				<-readerDone
-				// Drain any stdin error.
+				// Drain stdin error if present. On clean EOF, nothing
+				// was sent to stdinDone so the default branch fires.
+				// On scanner error, the send happens-before close(lines),
+				// so the buffered value is guaranteed visible here.
 				select {
 				case err := <-stdinDone:
 					if err != nil {
@@ -213,12 +213,12 @@ func runConnection(
 			}
 
 		case <-connCtx.Done():
-			// Reader detected disconnect (cancelled connCtx).
+			// Reader detected disconnect or parent context cancelled.
 			err := <-readerDone
 			if err != nil {
 				return nil, err
 			}
-			return nil, fmt.Errorf("connection lost")
+			return nil, fmt.Errorf("connection lost: %w", connCtx.Err())
 		}
 	}
 }

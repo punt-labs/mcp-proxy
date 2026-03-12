@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/punt-labs/mcp-proxy/internal/debuglog"
 	"github.com/punt-labs/mcp-proxy/internal/reconnect"
@@ -43,7 +44,9 @@ func run() int {
 func runHealthCheck(rawURL string) int {
 	logger := debuglog.Nop()
 
-	ctx, cancel := context.WithTimeout(context.Background(), transport.DialTimeout)
+	// Safety-net timeout slightly beyond Dial's internal DialTimeout,
+	// so runHealthCheck never hangs even if Dial's internals change.
+	ctx, cancel := context.WithTimeout(context.Background(), transport.DialTimeout+time.Second)
 	defer cancel()
 
 	conn, err := transport.Dial(ctx, rawURL, 0, logger)

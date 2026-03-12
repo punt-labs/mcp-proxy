@@ -1,4 +1,8 @@
 // Package bridge implements bidirectional forwarding between stdio and a WebSocket connection.
+//
+// The production code path uses [reconnect.Run] (which manages connection lifecycle
+// and reconnection). This package remains as the single-connection primitive used by
+// unit tests and partition tests to verify forwarding correctness in isolation.
 package bridge
 
 import (

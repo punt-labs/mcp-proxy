@@ -119,16 +119,19 @@ Either goroutine cancels the shared context on completion or error. `sync.Mutex`
 ### Shutdown Sequence
 
 **Stdin EOF (clean):**
+
 1. Scanner goroutine reaches EOF → cancels context
 2. Reader goroutine sees context cancellation → exits, closes stdin (unblocks scanner if stuck)
 3. WaitGroup completes → `Run()` returns nil
 
 **Daemon disconnect:**
+
 1. Reader goroutine gets WebSocket error → cancels context, closes stdin
 2. Scanner goroutine sees write error or stdin close → exits
 3. WaitGroup completes → `Run()` returns daemon error
 
 **Signal (SIGINT/SIGTERM):**
+
 1. `main.go` cancels context via `signal.NotifyContext`
 2. Both goroutines see context cancellation → exit
 3. Second signal force-exits via `forceExitOnSecondSignal` goroutine
@@ -362,6 +365,10 @@ Stdin close is irreversible. Even with an `io.Pipe` wrapper, the bridge's "close
 
 A wrapper script that restarts the proxy would lose in-flight messages and require re-resolving the session key. Reconnect belongs inside the proxy.
 
+### Backpressure
+
+The `lines` channel has capacity 64. During reconnect (daemon unreachable), stdin messages accumulate in this buffer. If Claude Code sends more than 64 messages before the proxy reconnects, the stdin goroutine blocks, which blocks Claude Code's stdin pipe. This is correct backpressure — the proxy cannot accept unbounded messages without a connection to deliver them. With a 5-second max backoff, 64 messages is unlikely to be hit in practice (MCP request rate is low), but the failure mode is a silent hang with no diagnostic output.
+
 ### Trade-off Accepted
 
 The `internal/bridge` package remains unchanged — it's still the right primitive for unit testing the bidirectional forwarding logic in isolation. The reconnect package is a higher-level coordinator that uses the same WebSocket operations but manages connection lifecycle.
@@ -376,7 +383,7 @@ The `internal/bridge` package remains unchanged — it's still the right primiti
 
 ### Design
 
-`mcp-proxy --health <url>` — dial with session key 0, close immediately, exit 0/1. Prints `mcp-proxy: ok` or `mcp-proxy: health check failed: <error>` to stderr. 5s timeout (matches `DialTimeout`).
+`mcp-proxy --health <url>` — dial with session key 0, close immediately, exit 0/1. Prints `mcp-proxy: ok` or `mcp-proxy: health check failed: <error>` to stderr. Timeout is `DialTimeout + 1s` (safety net beyond Dial's internal timeout).
 
 ### Why
 
