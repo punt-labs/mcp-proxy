@@ -623,6 +623,43 @@ At Claude Code hook firing rates — typically 1–10 events per minute per sess
 
 ---
 
+## DES-012: Stdin Read — Deadline-Based, Not EOF-Based
+
+**Date:** 2026-03-12
+**Status:** SETTLED
+**Topic:** How hook relay reads stdin without hanging when Claude Code doesn't close the pipe
+
+### Problem
+
+`io.ReadAll(stdin)` blocks until EOF. Claude Code pipes hook payloads to stdin but doesn't always close the pipe promptly — especially for `SessionStart` resume/compact events. This is the exact bug documented in biff DES-027, where `sys.stdin.read()` caused session resume to hang indefinitely.
+
+### Design
+
+Deadline-based chunked reads using `(*os.File).SetReadDeadline` (available on Unix since Go 1.19):
+
+1. **100ms initial timeout** — wait for first data. If nothing arrives, return empty (null params).
+2. **50ms inter-chunk timeout** — after getting data, wait for more. If nothing, return what we have.
+3. **EOF** — return immediately (normal case when Claude Code closes the pipe).
+
+For readers without deadline support (e.g., `strings.Reader` in tests), falls back to `io.ReadAll` — these readers don't block.
+
+### Why These Timeouts
+
+Matches biff DES-027's proven values. In practice, Claude Code writes the payload in <1ms — the timeouts are safety nets for the pathological case. The worst-case overhead is 50ms (data arrives but no EOF), which is acceptable within hook budgets (100ms for PreToolUse).
+
+### Why Not a Goroutine
+
+A goroutine running `io.ReadAll` with a `select` timeout would work, but `io.ReadAll` is all-or-nothing — if data exists but no EOF arrives, the goroutine blocks forever (leaked goroutine). The process exits anyway so the leak is harmless, but deadline-based reads are deterministic: no goroutine leak, no channel, the Read call returns with `os.ErrDeadlineExceeded`.
+
+### Test Coverage
+
+| Test | Scenario |
+|------|----------|
+| `TestNoEOFStdinDoesNotHang` | Data on pipe, no EOF — completes in ~50ms |
+| `TestEmptyStdinNoEOF` | Open pipe, no data, no EOF — completes in ~100ms |
+
+---
+
 ## Open Questions
 
 1. ~~**Daemon auto-start.** Proxy starts daemon if missing, or always user's responsibility?~~ Settled: no auto-start (DES-005), but reconnect with backoff (DES-009) handles daemon restarts transparently.

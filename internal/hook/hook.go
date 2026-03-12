@@ -10,9 +10,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"time"
 
 	"nhooyr.io/websocket"
 )
@@ -21,6 +24,14 @@ import (
 // after the request is sent. The hook framework enforces the real budget by
 // killing the process — this just prevents silent hangs.
 const ResponseTimeout = 30 // seconds (used by caller to set context deadline)
+
+// Stdin read timeouts. Claude Code pipes hook payloads to stdin but doesn't
+// always close the pipe promptly (biff DES-027). Without deadlines,
+// io.ReadAll blocks forever waiting for EOF.
+const (
+	stdinInitialTimeout    = 100 * time.Millisecond // wait for first data
+	stdinInterChunkTimeout = 50 * time.Millisecond  // wait for more data after first chunk
+)
 
 // request is a JSON-RPC 2.0 request or notification envelope.
 type request struct {
@@ -47,7 +58,7 @@ type response struct {
 // For async hooks (async=true): sends a notification (no id), performs a graceful
 // WebSocket close to guarantee delivery, and returns.
 func Run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, conn *websocket.Conn, event string, async bool, logger *slog.Logger) error {
-	payload, err := io.ReadAll(stdin)
+	payload, err := readStdin(stdin, logger)
 	if err != nil {
 		return fmt.Errorf("reading stdin: %w", err)
 	}
@@ -145,4 +156,63 @@ func sendRequest(ctx context.Context, conn *websocket.Conn, method string, param
 		logger.Debug("received response", "size", len(resp.Result))
 		return nil
 	}
+}
+
+// deadliner is implemented by types that support read deadlines (e.g., *os.File).
+type deadliner interface {
+	SetReadDeadline(t time.Time) error
+}
+
+// readStdin reads the hook payload from stdin using deadline-based chunked reads.
+//
+// Claude Code pipes hook payloads to stdin but doesn't always close the pipe
+// promptly (biff DES-027). A naive io.ReadAll blocks forever waiting for EOF.
+// This function uses SetReadDeadline (available on *os.File pipes since Go 1.19)
+// to return whatever data is available without waiting for EOF.
+//
+// For readers without deadline support (e.g., strings.Reader in tests),
+// falls back to io.ReadAll — these readers don't block, so the hang isn't possible.
+func readStdin(r io.Reader, logger *slog.Logger) ([]byte, error) {
+	dl, ok := r.(deadliner)
+	if !ok {
+		// Non-deadline reader (tests, strings.Reader). ReadAll is safe.
+		return io.ReadAll(r)
+	}
+
+	// Set initial deadline — if no data arrives within this window,
+	// assume stdin is empty and proceed with null params.
+	if err := dl.SetReadDeadline(time.Now().Add(stdinInitialTimeout)); err != nil {
+		// SetReadDeadline not supported on this fd. Fall back.
+		logger.Debug("SetReadDeadline failed, falling back to ReadAll", "error", err)
+		return io.ReadAll(r)
+	}
+
+	var buf bytes.Buffer
+	chunk := make([]byte, 65536)
+
+	for {
+		n, err := r.Read(chunk)
+		if n > 0 {
+			buf.Write(chunk[:n])
+			// Got data — switch to shorter inter-chunk timeout.
+			_ = dl.SetReadDeadline(time.Now().Add(stdinInterChunkTimeout))
+		}
+		if err != nil {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				// Timeout — return what we have. This is the normal path
+				// when Claude Code doesn't close stdin.
+				break
+			}
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+	}
+
+	// Clear deadline.
+	_ = dl.SetReadDeadline(time.Time{})
+
+	logger.Debug("read stdin", "size", buf.Len())
+	return buf.Bytes(), nil
 }

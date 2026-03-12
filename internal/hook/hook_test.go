@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -287,4 +288,93 @@ func TestAsyncDeliveryGuarantee(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(received[0], &envelope))
 	assert.JSONEq(t, payload, string(envelope.Params))
+}
+
+// TestNoEOFStdinDoesNotHang is a regression test for the biff DES-027 bug.
+// Claude Code pipes hook payloads to stdin but doesn't always close the pipe
+// promptly. With io.ReadAll this would hang forever; with deadline-based reads
+// it completes in ~150ms.
+func TestNoEOFStdinDoesNotHang(t *testing.T) {
+	d := testutil.NewMockDaemon()
+	defer d.Close()
+
+	d.Handler = func(msg []byte) []byte {
+		return []byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	logger := debuglog.Nop()
+	conn, err := transport.DialHook(ctx, d.HookURL(), 42, logger)
+	require.NoError(t, err)
+	conn.SetReadLimit(1024 * 1024)
+	defer conn.CloseNow()
+
+	// os.Pipe gives *os.File which supports SetReadDeadline.
+	// Write data but DON'T close the write end — simulates Claude Code
+	// not closing stdin promptly (the biff DES-027 bug condition).
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	defer r.Close()
+	defer w.Close()
+
+	_, err = w.Write([]byte(`{"event":"test"}`))
+	require.NoError(t, err)
+	// Deliberately not closing w — this is the bug condition.
+
+	var stdout, stderr bytes.Buffer
+
+	start := time.Now()
+	err = hook.Run(ctx, r, &stdout, &stderr, conn, "PreToolUse", false, logger)
+	elapsed := time.Since(start)
+
+	require.NoError(t, err)
+	assert.Less(t, elapsed, 2*time.Second, "should not hang waiting for EOF")
+	assert.JSONEq(t, `{"ok":true}`, strings.TrimSpace(stdout.String()))
+}
+
+// TestEmptyStdinNoEOF verifies that when stdin has no data AND no EOF
+// (open pipe, nothing written), the proxy returns empty params quickly.
+func TestEmptyStdinNoEOF(t *testing.T) {
+	d := testutil.NewMockDaemon()
+	defer d.Close()
+
+	d.Handler = func(msg []byte) []byte {
+		return []byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	logger := debuglog.Nop()
+	conn, err := transport.DialHook(ctx, d.HookURL(), 42, logger)
+	require.NoError(t, err)
+	conn.SetReadLimit(1024 * 1024)
+	defer conn.CloseNow()
+
+	// Open pipe, no data written, no EOF.
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	defer r.Close()
+	defer w.Close()
+
+	var stdout, stderr bytes.Buffer
+
+	start := time.Now()
+	err = hook.Run(ctx, r, &stdout, &stderr, conn, "SessionStart", false, logger)
+	elapsed := time.Since(start)
+
+	require.NoError(t, err)
+	assert.Less(t, elapsed, 2*time.Second, "should not hang on empty stdin without EOF")
+
+	// Verify daemon received null params.
+	received := d.Received()
+	require.NotEmpty(t, received)
+	last := received[len(received)-1]
+	var envelope struct {
+		Params json.RawMessage `json:"params"`
+	}
+	require.NoError(t, json.Unmarshal(last, &envelope))
+	assert.Equal(t, "null", string(envelope.Params))
 }
