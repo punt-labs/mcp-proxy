@@ -13,5 +13,5 @@ This file serves as a record that the plan existed and was followed.
 | 3 | Session identity | Done |
 | 4 | Real integration — Quarry | Not started (requires quarry WebSocket PR) |
 | 5 | Real integration — Biff (push) | Not started (requires biff WebSocket PR) |
-| 6 | Hardening | Not started |
+| 6 | Hardening | Partial (partition tests, boundary, exit timing) |
 | 7 | Release | Not started |
