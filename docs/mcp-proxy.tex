@@ -1,0 +1,397 @@
+%
+% mcp-proxy.tex
+%
+% Z Specification for mcp-proxy
+% Formal model of a bidirectional stdio-to-WebSocket MCP proxy
+%
+
+\documentclass[a4paper,10pt,fleqn]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{fuzz}
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+
+\begin{document}
+
+\title{mcp-proxy: A Z Specification}
+\author{Formal Model of a Bidirectional MCP Proxy}
+\date{March 2026}
+\hypersetup{
+  pdftitle={mcp-proxy: A Z Specification},
+  pdfauthor={Punt Labs},
+  pdfsubject={Z Specification},
+  pdfcreator={fuzz/probcli}
+}
+\maketitle
+
+\tableofcontents
+\newpage
+
+% ───────────────────────────────────────────────────────────────────
+\section{Introduction}
+% ───────────────────────────────────────────────────────────────────
+
+\texttt{mcp-proxy} bridges Claude Code's MCP stdio transport to a shared
+daemon process over WebSocket.  It forwards JSON-RPC messages opaquely---no
+parsing, no routing, no transformation.  Two concurrent channels carry
+messages in each direction (stdin$\to$daemon, daemon$\to$stdout), with
+coordinated shutdown on stdin EOF or daemon disconnect.
+
+This specification models three aspects of the proxy:
+
+\begin{enumerate}
+  \item The \textbf{proxy lifecycle}: startup, connection, bridging, and
+    shutdown phases.
+  \item The \textbf{bridge}: bidirectional message forwarding with ordering
+    guarantees and shutdown coordination.
+  \item The \textbf{session key resolver}: process tree walking to find the
+    topmost \texttt{claude} ancestor.
+\end{enumerate}
+
+% ───────────────────────────────────────────────────────────────────
+\section{Basic Types}
+% ───────────────────────────────────────────────────────────────────
+
+\begin{zed}
+  [MSG, URL]
+\end{zed}
+
+$MSG$ represents an opaque MCP JSON-RPC message (one line of NDJSON).
+$URL$ represents a daemon WebSocket URL.
+
+% ───────────────────────────────────────────────────────────────────
+\section{Free Types}
+% ───────────────────────────────────────────────────────────────────
+
+\begin{zed}
+  ZBOOL ::= ztrue | zfalse
+\end{zed}
+
+\begin{zed}
+  ProxyPhase ::= %%
+  phaseInit | phaseConnecting | phaseBridging | phaseShutdown
+\end{zed}
+
+The proxy moves through four phases: initial argument parsing, dialing
+the daemon, bidirectional forwarding, and shutdown.
+
+\begin{zed}
+  DialResult ::= dialOk | dialRefused | dialTimeout | dialBadURL
+\end{zed}
+
+\begin{zed}
+  ShutdownCause ::= %%
+  causeStdinEOF | causeDaemonGone | causeSignal | causeError
+\end{zed}
+
+\begin{zed}
+  ChannelStatus ::= chanActive | chanDone | chanError
+\end{zed}
+
+Each of the two bridge channels (stdin-to-daemon and daemon-to-stdout)
+is independently active, done, or errored.
+
+% ───────────────────────────────────────────────────────────────────
+\section{Global Constants}
+% ───────────────────────────────────────────────────────────────────
+
+\begin{axdef}
+  maxMessageSize : \nat \\
+  maxTreeDepth : \nat \\
+  dialTimeoutMs : \nat
+  \where
+  maxMessageSize = 1048576 \\
+  maxTreeDepth = 10 \\
+  dialTimeoutMs = 5000
+\end{axdef}
+
+$maxMessageSize$ is 1\,MB---the scanner buffer and WebSocket read limit.
+$maxTreeDepth$ bounds the process tree walk (safety against cycles).
+$dialTimeoutMs$ is the WebSocket connection timeout.
+
+% ───────────────────────────────────────────────────────────────────
+\section{Proxy Lifecycle}
+% ───────────────────────────────────────────────────────────────────
+
+\begin{schema}{Proxy}
+  phase : ProxyPhase \\
+  daemonURL : URL \\
+  sessionKey : \nat_1 \\
+  exitCode : \nat
+  \where
+  exitCode \leq 2 \\
+  sessionKey \leq 5 \\
+  phase = phaseInit \implies exitCode = 0 \\
+  phase = phaseBridging \implies exitCode = 0
+\end{schema}
+
+The proxy holds the daemon URL, the resolved session key (always a
+positive PID), and an exit code.  While initializing or bridging, exit
+code is always~0.
+
+\begin{schema}{InitProxy}
+  Proxy'
+  \where
+  phase' = phaseConnecting \\
+  sessionKey' = 1 \\
+  exitCode' = 0
+\end{schema}
+
+The session key is set to a placeholder; the daemon URL is left
+unconstrained (chosen by the environment).  The session key is
+resolved before dialing (modeled separately in the session key
+section).
+
+% ───────────────────────────────────────────────────────────────────
+\subsection{Dial}
+
+\begin{schema}{DialSuccess}
+  \Delta Proxy \\
+  \Xi Bridge \\
+  key? : \nat_1
+  \where
+  phase = phaseConnecting \\
+  key? \leq 5 \\
+  phase' = phaseBridging \\
+  sessionKey' = key? \\
+  daemonURL' = daemonURL \\
+  exitCode' = 0
+\end{schema}
+
+\begin{schema}{DialFailure}
+  \Delta Proxy \\
+  \Xi Bridge \\
+  result? : DialResult
+  \where
+  phase = phaseConnecting \\
+  result? \neq dialOk \\
+  phase' = phaseShutdown \\
+  daemonURL' = daemonURL \\
+  sessionKey' = sessionKey \\
+  exitCode' = 1
+\end{schema}
+
+% ───────────────────────────────────────────────────────────────────
+\subsection{Shutdown}
+
+\begin{schema}{Shutdown}
+  \Delta Proxy \\
+  \Xi Bridge \\
+  cause? : ShutdownCause
+  \where
+  phase = phaseBridging \\
+  phase' = phaseShutdown \\
+  daemonURL' = daemonURL \\
+  sessionKey' = sessionKey \\
+  cause? = causeStdinEOF \implies exitCode' = 0 \\
+  cause? \neq causeStdinEOF \implies exitCode' = 1
+\end{schema}
+
+Only stdin EOF produces exit code~0.  Daemon disconnect, signal, or
+error all produce exit code~1.
+
+% ───────────────────────────────────────────────────────────────────
+\section{Bridge}
+% ───────────────────────────────────────────────────────────────────
+
+The bridge models the two concurrent channels as ordered sequences of
+messages, with independent status tracking.
+
+\begin{schema}{Bridge}
+  stdinQueue : \seq MSG \\
+  daemonQueue : \seq MSG \\
+  stdinStatus : ChannelStatus \\
+  daemonStatus : ChannelStatus \\
+  forwarded : \nat \\
+  received : \nat
+  \where
+  forwarded = \# stdinQueue \\
+  received = \# daemonQueue \\
+  stdinStatus = chanDone \implies daemonStatus \neq chanActive \\
+  forwarded \leq 3 \\
+  received \leq 3
+\end{schema}
+
+$stdinQueue$ records messages forwarded from stdin to the daemon (in
+order). $daemonQueue$ records messages received from the daemon and
+written to stdout (in order).  The counts are maintained as schema
+fields to make the relationship explicit.
+
+The key invariant: once stdin is done, the daemon channel cannot remain
+active---the bridge initiates shutdown when stdin reaches EOF.
+
+\begin{schema}{InitBridge}
+  Bridge'
+  \where
+  stdinQueue' = \langle\rangle \\
+  daemonQueue' = \langle\rangle \\
+  stdinStatus' = chanActive \\
+  daemonStatus' = chanActive \\
+  forwarded' = 0 \\
+  received' = 0
+\end{schema}
+
+% ───────────────────────────────────────────────────────────────────
+\subsection{Forward Message (stdin $\to$ daemon)}
+
+\begin{schema}{ForwardMessage}
+  \Xi Proxy \\
+  \Delta Bridge \\
+  msg? : MSG
+  \where
+  phase = phaseBridging \\
+  stdinStatus = chanActive \\
+  daemonStatus = chanActive \\
+  stdinQueue' = stdinQueue \cat \langle msg? \rangle \\
+  forwarded' = forwarded + 1 \\
+  daemonQueue' = daemonQueue \\
+  daemonStatus' = daemonStatus \\
+  received' = received \\
+  stdinStatus' = stdinStatus
+\end{schema}
+
+A message from stdin is appended to the forwarded sequence.
+Both channels must be active.
+
+% ───────────────────────────────────────────────────────────────────
+\subsection{Receive Message (daemon $\to$ stdout)}
+
+\begin{schema}{ReceiveMessage}
+  \Xi Proxy \\
+  \Delta Bridge \\
+  msg? : MSG
+  \where
+  phase = phaseBridging \\
+  daemonStatus = chanActive \\
+  daemonQueue' = daemonQueue \cat \langle msg? \rangle \\
+  received' = received + 1 \\
+  stdinQueue' = stdinQueue \\
+  stdinStatus' = stdinStatus \\
+  forwarded' = forwarded
+\end{schema}
+
+A message from the daemon is appended to the received sequence.
+This operation does not require stdin to be active---push messages
+can arrive even after stdin EOF (during the drain window).
+
+% ───────────────────────────────────────────────────────────────────
+\subsection{Stdin EOF}
+
+\begin{schema}{StdinEOF}
+  \Xi Proxy \\
+  \Delta Bridge
+  \where
+  phase = phaseBridging \\
+  stdinStatus = chanActive \\
+  stdinStatus' = chanDone \\
+  daemonStatus' = chanDone \\
+  stdinQueue' = stdinQueue \\
+  daemonQueue' = daemonQueue \\
+  forwarded' = forwarded \\
+  received' = received
+\end{schema}
+
+When stdin reaches EOF, both channels transition out of active.
+This models the context cancellation that propagates from the scanner
+goroutine to the reader goroutine.
+
+% ───────────────────────────────────────────────────────────────────
+\subsection{Daemon Disconnect}
+
+\begin{schema}{DaemonDisconnect}
+  \Xi Proxy \\
+  \Delta Bridge
+  \where
+  phase = phaseBridging \\
+  daemonStatus = chanActive \\
+  daemonStatus' = chanError \\
+  stdinStatus' = chanDone \\
+  stdinQueue' = stdinQueue \\
+  daemonQueue' = daemonQueue \\
+  forwarded' = forwarded \\
+  received' = received
+\end{schema}
+
+When the daemon disconnects unexpectedly, the daemon channel errors
+and stdin is closed (the reader goroutine closes stdin to unblock
+the scanner).
+
+% ───────────────────────────────────────────────────────────────────
+\section{Session Key Resolution}
+% ───────────────────────────────────────────────────────────────────
+
+The session key resolver walks a process tree to find the topmost
+\texttt{claude} ancestor.  This is a pure function invoked once at
+startup---it is not part of the runtime state machine.  We document
+its contract here for completeness.
+
+\textbf{Contract.}  Given a process table (mapping PIDs to parent
+PIDs) and a set of PIDs whose \texttt{comm} basename is
+\texttt{claude}, the resolver returns the topmost claude ancestor
+of the proxy's PID.  If no claude ancestor exists, it returns
+\texttt{os.Getppid()} as a fallback.  The walk is bounded to
+$maxTreeDepth$ iterations (safety against cycles).  On macOS,
+\texttt{path.Base(comm)} normalises full paths
+(\texttt{/Applications/Claude.app/.../claude}) to basenames.
+
+% ───────────────────────────────────────────────────────────────────
+\section{Unified State}
+% ───────────────────────────────────────────────────────────────────
+
+\begin{schema}{State}
+  Proxy \\
+  Bridge
+  \where
+  phase = phaseBridging \implies %%
+  (stdinStatus = chanActive \lor daemonStatus = chanActive) \\
+  phase = phaseShutdown \implies %%
+  stdinStatus \neq chanActive
+\end{schema}
+
+While bridging, at least one channel is active.  After shutdown,
+stdin is never active.
+
+\begin{schema}{Init}
+  State'
+  \where
+  phase' = phaseConnecting \\
+  sessionKey' = 1 \\
+  exitCode' = 0 \\
+  stdinQueue' = \langle\rangle \\
+  daemonQueue' = \langle\rangle \\
+  stdinStatus' = chanActive \\
+  daemonStatus' = chanActive \\
+  forwarded' = 0 \\
+  received' = 0
+\end{schema}
+
+% ───────────────────────────────────────────────────────────────────
+\section{System Invariants}
+% ───────────────────────────────────────────────────────────────────
+
+\begin{enumerate}
+  \item \textbf{Message ordering.}  Messages are forwarded in the order
+    they arrive on stdin.  Messages from the daemon are written to stdout
+    in the order they arrive on the WebSocket.  The sequences
+    $stdinQueue$ and $daemonQueue$ capture this.
+
+  \item \textbf{Message opacity.}  The proxy never parses, validates, or
+    transforms messages.  Every $MSG$ forwarded is byte-identical to the
+    $MSG$ received.
+
+  \item \textbf{Coordinated shutdown.}  Once stdin reaches EOF, the daemon
+    channel exits active.  Once the daemon disconnects, stdin is closed.
+    Neither channel can remain active alone indefinitely.
+
+  \item \textbf{Clean exit on EOF.}  Exit code~0 only when stdin EOF
+    caused shutdown (the caller closed the pipe).
+
+  \item \textbf{Session identity.}  The session key is a positive integer
+    (PID) resolved once at startup and passed to the daemon.  It does not
+    change during the proxy's lifetime.
+
+  \item \textbf{Bounded tree walk.}  The session key resolver terminates
+    in at most $maxTreeDepth$ iterations regardless of process table
+    structure (cycles, deep chains).
+\end{enumerate}
+
+\end{document}

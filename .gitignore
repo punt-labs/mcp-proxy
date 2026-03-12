@@ -1,0 +1,35 @@
+# Binary
+mcp-proxy
+dist/
+
+# Test artifacts
+coverage.out
+
+# OS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Temp
+.tmp/
+
+# Local-only
+.beads/
+.claude/
+.vox/
+
+# Z tooling
+docs/fuzz.sty
+docs/*.mf
+docs/*.pk
+docs/*.tfm
+docs/*.aux
+docs/*.log
+docs/*.fuzz
+docs/*.toc
+docs/*.out
+docs/*.pdf
