@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+
 - Bidirectional JSON-RPC forwarding between stdio and WebSocket daemon
 - Session identity resolution via process tree walking (ported from biff)
 - WebSocket transport with typed connection errors

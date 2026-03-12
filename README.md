@@ -86,7 +86,7 @@ Request-response only. Existing daemons (`quarry serve`, `biff serve`) already s
 
 ### Option B: Raw Unix Domain Socket
 
-Persistent bidirectional connection. NDJSON (newline-delimited JSON) or length-prefixed framing. Daemon can push to any connected proxy at any time. Lowest latency (kernel IPC, no TCP). SageOx ships this in production (see [Prior Art](#sageox-sageoxox)).
+Persistent bidirectional connection. NDJSON (newline-delimited JSON) or length-prefixed framing. Daemon can push to any connected proxy at any time. Lowest latency (kernel IPC, no TCP). SageOx ships this in production (see [Prior Art](#sageox-sageoxox--closest-match)).
 
 **Trade-off:** DIY framing and keepalive (~20 lines of Go each, but must be correct). NDJSON is debuggable with `echo '{"type":"ping"}' | socat - UNIX:/path/sock` — SageOx chose this over length-prefix specifically for debuggability. Local-only (no cross-machine).
 
