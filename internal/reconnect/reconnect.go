@@ -191,7 +191,10 @@ func runConnection(
 				// then wait for it to exit.
 				connCancel()
 				<-readerDone
-				// Drain any stdin error.
+				// Drain stdin error if present. On clean EOF, nothing
+				// was sent to stdinDone so the default branch fires.
+				// On scanner error, the send happens-before close(lines),
+				// so the buffered value is guaranteed visible here.
 				select {
 				case err := <-stdinDone:
 					if err != nil {
