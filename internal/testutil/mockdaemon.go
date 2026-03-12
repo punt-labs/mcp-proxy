@@ -276,6 +276,13 @@ func (d *MockDaemon) handleHook(w http.ResponseWriter, r *http.Request) {
 	d.connCount++
 	d.mu.Unlock()
 
+	defer func() {
+		d.mu.Lock()
+		d.disconnected = true
+		d.conn = nil
+		d.mu.Unlock()
+	}()
+
 	// Read exactly one message.
 	_, msg, err := conn.Read(r.Context())
 	if err != nil {

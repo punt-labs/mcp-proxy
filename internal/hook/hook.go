@@ -23,7 +23,11 @@ import (
 // ResponseTimeout is the safety-net timeout for waiting for a daemon response
 // after the request is sent. The hook framework enforces the real budget by
 // killing the process — this just prevents silent hangs.
-const ResponseTimeout = 30 // seconds (used by caller to set context deadline)
+const ResponseTimeout = 30 * time.Second
+
+// ErrDaemonError is returned when the daemon responds with a JSON-RPC error.
+// The error details have already been printed to stderr by Run.
+var ErrDaemonError = errors.New("daemon returned error")
 
 // Stdin read timeouts. Claude Code pipes hook payloads to stdin but doesn't
 // always close the pipe promptly (biff DES-027). Without deadlines,
@@ -142,10 +146,10 @@ func sendRequest(ctx context.Context, conn *websocket.Conn, method string, param
 			continue
 		}
 
-		// Error response: print error to stderr, return error for exit code 1.
+		// Error response: print error to stderr, return sentinel for exit code 1.
 		if len(resp.Error) > 0 && string(resp.Error) != "null" {
 			fmt.Fprintf(stderr, "%s\n", resp.Error)
-			return fmt.Errorf("daemon returned error")
+			return ErrDaemonError
 		}
 
 		// Success response: print result to stdout.

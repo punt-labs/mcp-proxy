@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -149,13 +150,13 @@ func runHook(rawURL string, event string, async bool) int {
 
 	// Response timeout: safety net against daemon hangs.
 	// The hook framework enforces the real budget by killing the process.
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(hook.ResponseTimeout)*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), hook.ResponseTimeout)
 	defer cancel()
 
 	err = hook.Run(ctx, os.Stdin, os.Stdout, os.Stderr, conn, event, async, logger)
 	if err != nil {
-		// Only print if it's not already been printed to stderr by hook.Run.
-		if !strings.Contains(err.Error(), "daemon returned error") {
+		// ErrDaemonError means hook.Run already printed the error to stderr.
+		if !errors.Is(err, hook.ErrDaemonError) {
 			fmt.Fprintf(os.Stderr, "mcp-proxy: %v\n", err)
 		}
 		return 1

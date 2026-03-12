@@ -455,7 +455,7 @@ mcp-proxy <url> --hook <event> < payload.json
 mcp-proxy <url> --hook --async <event> < payload.json
 ```
 
-The `<url>` is the base daemon URL (e.g., `ws://localhost:8080`). The proxy appends `/hook` for hook relay mode, `/mcp` for MCP bridge mode. This keeps invocations consistent — the same base URL works for both modes.
+The `<url>` is the base daemon URL (e.g., `ws://localhost:8080`). The proxy appends `/hook` for hook relay mode. For MCP bridge mode, the user passes the full URL including path (e.g., `ws://localhost:8080/mcp`) — the proxy dials it verbatim. This keeps hook invocations simple (same base URL, proxy appends the endpoint) while bridge mode remains explicit about the daemon's MCP path.
 
 **Wire protocol — JSON-RPC over WebSocket at `/hook`:**
 
