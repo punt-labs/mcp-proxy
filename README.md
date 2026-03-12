@@ -13,6 +13,31 @@ Claude Code spawns one MCP server process per session via stdio transport. When 
 | Vox     | Audio output device | File lock contention (`flock`), redundant provider clients |
 | Lux     | ImGui display server | Already centralized — but MCP layer still per-session |
 
+## Hook Latency
+
+MCP server duplication is one cost. Hook latency is the other — and the one users feel most acutely.
+
+Claude Code fires `SessionStart` hooks serially within each plugin. Across quarry, biff, vox, and lux, seven hooks fire on every session start or resume, spawning four Python processes. Measured on an M2 MacBook Air (Python 3.14):
+
+| Plugin | Hook | Time | Bottleneck |
+|--------|------|------|------------|
+| quarry | `session-start.sh` | 0.3s | Shell only |
+| quarry | `session-sync.sh` | **4.8s** | `pydantic_settings` import (1.9s) via `quarry.config` |
+| biff | `session-start.sh` | 0.1s | Shell only |
+| biff | `session-init.sh` | **20.0s** | `biff hook claude-code session-start` (full module load) |
+| biff | `session-resume.sh` | **16.5s** | `biff hook claude-code session-resume` (same module, second process) |
+| vox | `session-start.sh` | 0.1s | Shell only |
+| lux | `session-start.sh` | 1.0s | Lightweight Python (0.3s import) |
+| **Serial total** | | **~43s** | |
+
+Observed wall time is ~15s (some cross-plugin parallelism), but the slowest plugin gates startup.
+
+**Root cause:** Hook handlers import their entire module's dependency tree at module level. Quarry's `session-start` handler needs `sqlite3` + `subprocess` (0.12s) but pays for `lancedb` (16.2s), `onnxruntime` (0.8s), and `pymupdf` (0.3s) because all handlers share one module. Biff fires two separate Python processes for init vs resume, paying the full import cost twice.
+
+**Tactical fixes** (handler isolation, hook consolidation, lazy imports) can reduce ~43s to ~5s. The proxy eliminates it entirely: hook handlers call into an already-warm daemon over the proxy's persistent connection. Zero Python startup, zero import cost, zero per-session overhead.
+
+See `../hooks-latency.md` for the full measurement report and per-fix impact analysis.
+
 ## Solution
 
 A single static Go binary reads MCP JSON-RPC from stdin and forwards it to a shared daemon. The proxy is transparent — it doesn't know what tools exist. Tool discovery, listing, and execution pass through unchanged.
@@ -61,7 +86,7 @@ Request-response only. Existing daemons (`quarry serve`, `biff serve`) already s
 
 ### Option B: Raw Unix Domain Socket
 
-Persistent bidirectional connection. NDJSON (newline-delimited JSON) or length-prefixed framing. Daemon can push to any connected proxy at any time. Lowest latency (kernel IPC, no TCP). SageOx ships this in production (see [Prior Art](#sageox-sageoxox)).
+Persistent bidirectional connection. NDJSON (newline-delimited JSON) or length-prefixed framing. Daemon can push to any connected proxy at any time. Lowest latency (kernel IPC, no TCP). SageOx ships this in production (see [Prior Art](#sageox-sageoxox--closest-match)).
 
 **Trade-off:** DIY framing and keepalive (~20 lines of Go each, but must be correct). NDJSON is debuggable with `echo '{"type":"ping"}' | socat - UNIX:/path/sock` — SageOx chose this over length-prefix specifically for debuggability. Local-only (no cross-machine).
 
