@@ -132,7 +132,7 @@ func TestProxy_E2E_NoArgs(t *testing.T) {
 func TestProxy_E2E_ConnectionRefused_Reconnects(t *testing.T) {
 	bin := binaryPath(t)
 
-	// 1s is enough: first retry message appears at 250ms backoff.
+	// 1s is enough: reconnect logs "retrying in ..." immediately after the first dial failure.
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 

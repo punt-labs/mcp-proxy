@@ -158,13 +158,18 @@ func (d *MockDaemon) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
-	// Goroutine for sending push messages.
+	// All outbound messages go through this channel so there is only one
+	// concurrent writer on the conn (nhooyr/websocket guarantees one reader
+	// + one writer, not two writers).
+	writes := make(chan []byte, 100)
+
+	// Writer goroutine: sole writer on conn.
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case msg := <-d.Push:
+			case msg := <-writes:
 				if err := conn.Write(ctx, websocket.MessageText, msg); err != nil {
 					d.mu.Lock()
 					d.pushErr = err
@@ -175,7 +180,23 @@ func (d *MockDaemon) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// Read loop.
+	// Push forwarder: routes external push messages into the writes channel.
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg := <-d.Push:
+				select {
+				case writes <- msg:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+
+	// Read loop: reads from conn, sends responses via writes channel.
 	for {
 		_, msg, err := conn.Read(ctx)
 		if err != nil {
@@ -195,8 +216,10 @@ func (d *MockDaemon) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if resp != nil {
-			if err := conn.Write(ctx, websocket.MessageText, resp); err != nil {
-				break
+			select {
+			case writes <- resp:
+			case <-ctx.Done():
+				return
 			}
 		}
 	}

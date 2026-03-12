@@ -383,7 +383,7 @@ The `internal/bridge` package remains unchanged — it's still the right primiti
 
 ### Design
 
-`mcp-proxy --health <url>` — dial with session key 0, close immediately, exit 0/1. Prints `mcp-proxy: ok` or `mcp-proxy: health check failed: <error>` to stderr. 5s timeout (matches `DialTimeout`).
+`mcp-proxy --health <url>` — dial with session key 0, close immediately, exit 0/1. Prints `mcp-proxy: ok` or `mcp-proxy: health check failed: <error>` to stderr. Timeout is `DialTimeout + 1s` (safety net beyond Dial's internal timeout).
 
 ### Why
 
