@@ -133,6 +133,8 @@ func (d *MockDaemon) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	d.mu.Lock()
 	d.sessionKey = r.URL.Query().Get("session_key")
 	d.authHeader = r.Header.Get("Authorization")
+	d.acceptErr = nil
+	d.pushErr = nil
 	d.mu.Unlock()
 
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
