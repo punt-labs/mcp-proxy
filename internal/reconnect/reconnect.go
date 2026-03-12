@@ -213,12 +213,12 @@ func runConnection(
 			}
 
 		case <-connCtx.Done():
-			// Reader detected disconnect (cancelled connCtx).
+			// Reader detected disconnect or parent context cancelled.
 			err := <-readerDone
 			if err != nil {
 				return nil, err
 			}
-			return nil, fmt.Errorf("connection lost")
+			return nil, fmt.Errorf("connection lost: %w", connCtx.Err())
 		}
 	}
 }

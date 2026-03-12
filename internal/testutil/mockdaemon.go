@@ -31,6 +31,8 @@ type MockDaemon struct {
 	disconnected bool
 	conn         *websocket.Conn
 	connCount    int
+	acceptErr    error
+	pushErr      error
 }
 
 // NewMockDaemon creates and starts a mock daemon server.
@@ -87,6 +89,22 @@ func (d *MockDaemon) Disconnected() bool {
 	return d.disconnected
 }
 
+// AcceptErr returns the last WebSocket accept error, if any.
+// Useful for diagnosing test timeouts caused by failed upgrades.
+func (d *MockDaemon) AcceptErr() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.acceptErr
+}
+
+// PushErr returns the last push write error, if any.
+// Useful for diagnosing test timeouts when a push message was never delivered.
+func (d *MockDaemon) PushErr() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.pushErr
+}
+
 // ConnCount returns the total number of WebSocket connections accepted.
 func (d *MockDaemon) ConnCount() int {
 	d.mu.Lock()
@@ -121,6 +139,9 @@ func (d *MockDaemon) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		InsecureSkipVerify: true,
 	})
 	if err != nil {
+		d.mu.Lock()
+		d.acceptErr = err
+		d.mu.Unlock()
 		return
 	}
 	conn.SetReadLimit(1024 * 1024) // 1MB to match proxy
@@ -142,7 +163,12 @@ func (d *MockDaemon) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			case <-ctx.Done():
 				return
 			case msg := <-d.Push:
-				_ = conn.Write(ctx, websocket.MessageText, msg)
+				if err := conn.Write(ctx, websocket.MessageText, msg); err != nil {
+					d.mu.Lock()
+					d.pushErr = err
+					d.mu.Unlock()
+					return
+				}
 			}
 		}
 	}()

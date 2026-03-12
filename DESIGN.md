@@ -362,6 +362,10 @@ Stdin close is irreversible. Even with an `io.Pipe` wrapper, the bridge's "close
 
 A wrapper script that restarts the proxy would lose in-flight messages and require re-resolving the session key. Reconnect belongs inside the proxy.
 
+### Backpressure
+
+The `lines` channel has capacity 64. During reconnect (daemon unreachable), stdin messages accumulate in this buffer. If Claude Code sends more than 64 messages before the proxy reconnects, the stdin goroutine blocks, which blocks Claude Code's stdin pipe. This is correct backpressure — the proxy cannot accept unbounded messages without a connection to deliver them. With a 5-second max backoff, 64 messages is unlikely to be hit in practice (MCP request rate is low), but the failure mode is a silent hang with no diagnostic output.
+
 ### Trade-off Accepted
 
 The `internal/bridge` package remains unchanged — it's still the right primitive for unit testing the bidirectional forwarding logic in isolation. The reconnect package is a higher-level coordinator that uses the same WebSocket operations but manages connection lifecycle.

@@ -37,7 +37,7 @@ func FromEnv() (*slog.Logger, io.Closer) {
 
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		// Can't open log file — fall back to nop rather than failing.
+		fmt.Fprintf(os.Stderr, "mcp-proxy: warning: cannot open debug log %q: %v\n", path, err)
 		return Nop(), io.NopCloser(nil)
 	}
 
