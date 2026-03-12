@@ -5,7 +5,9 @@
 [![License](https://img.shields.io/github/license/punt-labs/mcp-proxy)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/punt-labs/mcp-proxy/test.yml?label=CI)](https://github.com/punt-labs/mcp-proxy/actions/workflows/test.yml)
 
-Claude Code spawns one MCP server per session via stdio. When servers hold expensive shared state (ML models, NATS connections, audio queues), every session duplicates it. mcp-proxy eliminates the duplication: a single static binary reads MCP JSON-RPC from stdin and forwards it over WebSocket to a shared daemon.
+Claude Code spawns a fresh MCP server process for every session. If you open three terminal tabs, you get three copies of your server — three copies of its models, connections, and state. When the server is heavy (an ML embedding model, a database connection pool, a NATS relay), this wastes hundreds of megabytes of memory and adds seconds of startup time to each session.
+
+mcp-proxy fixes this. Instead of spawning the real server, Claude Code spawns a tiny Go binary (~5MB, <10ms startup) that forwards MCP messages over WebSocket to a single shared daemon:
 
 ```text
                     stdio                      WebSocket
@@ -13,25 +15,24 @@ Claude Code ◄──────────────► mcp-proxy ◄──
              MCP JSON-RPC                                       (one process)
 ```
 
+The proxy works with **any MCP server** that exposes a WebSocket endpoint speaking MCP JSON-RPC — it never inspects message content. Your server doesn't need to be modified; it just needs a WebSocket transport in addition to (or instead of) stdio.
+
 **Platforms:** macOS, Linux
 
+## Daemon Requirements
+
+Your MCP server must:
+
+1. **Accept WebSocket connections** with the `mcp` subprotocol (`Sec-WebSocket-Protocol: mcp`)
+2. **Speak MCP JSON-RPC 2.0** — one JSON object per WebSocket text frame
+3. **Be running before the proxy connects** — the proxy fails fast if the daemon is unreachable (no auto-start, no retries)
+
+Optionally, the daemon can:
+
+- **Read `?session_key=<pid>`** from the WebSocket upgrade URL to maintain per-session state (e.g., separate database selections per Claude Code tab)
+- **Push server-initiated messages** (e.g., `notifications/tools/list_changed`) — the proxy forwards them to stdout immediately
+
 ## Install
-
-### Via quarry (recommended)
-
-If you use [quarry](https://github.com/punt-labs/quarry), it installs mcp-proxy automatically:
-
-```bash
-quarry install
-```
-
-This downloads the correct binary, verifies its SHA256 checksum, and places it in `~/.local/bin/`.
-
-### Go
-
-```bash
-go install github.com/punt-labs/mcp-proxy@latest
-```
 
 ### Binary
 
@@ -44,6 +45,16 @@ mv mcp-proxy ~/.local/bin/
 ```
 
 Replace `darwin-arm64` with your platform: `darwin-amd64`, `linux-arm64`, `linux-amd64`.
+
+### Go
+
+```bash
+go install github.com/punt-labs/mcp-proxy@latest
+```
+
+### Via quarry
+
+If you use [quarry](https://github.com/punt-labs/quarry), `quarry install` downloads mcp-proxy automatically (SHA256-verified, correct platform).
 
 ## Usage
 
@@ -147,16 +158,30 @@ The bridge protocol has a [Z specification](docs/mcp-proxy.tex) verified by ProB
 See [DESIGN.md](DESIGN.md) for the decision log covering transport selection, session identity algorithm, concurrency model, and message format.
 
 <details>
-<summary>Why these daemons need a proxy</summary>
+<summary>When does an MCP server need a proxy?</summary>
 
-| Project | Shared State | Cost Per Session | Push Required |
-|---------|-------------|-----------------|---------------|
-| Quarry | LanceDB index + ONNX model | ~200MB memory | No |
-| Biff | NATS relay connection | TCP + KV watches | Yes (`tools/list_changed`) |
-| Vox | Audio output device | File lock contention | No |
-| Lux | ImGui display server | Already centralized | Yes (interaction events) |
+A proxy makes sense when your MCP server has **expensive startup**, **heavy shared state**, or **needs server push**:
 
-A daemon is necessary when per-invocation state loading is prohibitive, or the system requires server-initiated push. These projects have both constraints.
+| Symptom | Without Proxy | With Proxy |
+|---------|--------------|------------|
+| ML model loading (embeddings, classifiers) | Every session loads the model (~200MB, ~2s) | Model loaded once, shared across sessions |
+| Database connection pools | N sessions = N pools | One pool, N lightweight proxies |
+| Singleton resources (audio device, display) | File lock contention between sessions | Single owner, proxy multiplexes access |
+| Server-initiated notifications | Not possible with stdio (client must poll) | Daemon pushes via WebSocket, proxy writes to stdout |
+
+If your MCP server is stateless and starts in <100ms, you don't need a proxy — direct stdio is simpler.
+
+</details>
+
+<details>
+<summary>Projects using mcp-proxy</summary>
+
+| Project | Shared State | Why Daemon |
+|---------|-------------|-----------|
+| [Quarry](https://github.com/punt-labs/quarry) | LanceDB index + ONNX embedding model | ~200MB memory, ~2s cold start |
+| [Biff](https://github.com/punt-labs/biff) | NATS relay connection | Persistent TCP, server push (`tools/list_changed`) |
+| [Vox](https://github.com/punt-labs/vox) | Audio output device | File lock, singleton resource |
+| [Lux](https://github.com/punt-labs/lux) | ImGui display server | Already centralized, interaction events |
 
 </details>
 
