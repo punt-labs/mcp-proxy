@@ -147,9 +147,11 @@ func TestBridge_BidirectionalPush(t *testing.T) {
 		done <- bridge.Run(ctx, stdinR, stdoutW, conn, testLogger(t))
 	}()
 
-	// Send a request to ensure connection is live, then push.
+	// Send a request to ensure connection is live before pushing.
 	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"init","id":1}`)
-	time.Sleep(50 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		return len(d.Received()) >= 1
+	}, 3*time.Second, 5*time.Millisecond, "timed out waiting for daemon to receive init")
 
 	push := `{"jsonrpc":"2.0","method":"tools/list_changed"}`
 	d.Push <- []byte(push)

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/url"
+	"strings"
 	"time"
 
 	"nhooyr.io/websocket"
@@ -78,7 +79,8 @@ func Dial(ctx context.Context, rawURL string, sessionKey int, logger *slog.Logge
 		var netErr *net.OpError
 		if errors.As(err, &netErr) {
 			if netErr.Op == "dial" {
-				if errors.Is(netErr.Err, &net.DNSError{}) || isConnectionRefused(netErr.Err) {
+				var dnsErr *net.DNSError
+				if errors.As(netErr.Err, &dnsErr) || isConnectionRefused(netErr.Err) {
 					logger.Debug("dial failed", "reason", "connection refused", "addr", addr)
 					return nil, &ConnectionRefusedError{Addr: addr}
 				}
@@ -113,33 +115,13 @@ func isConnectionRefused(err error) bool {
 	if errors.As(err, &opErr) {
 		return isConnectionRefused(opErr.Err)
 	}
-	return errorContains(err, "connection refused")
+	return strings.Contains(err.Error(), "connection refused")
 }
 
 func isTimeout(err error) bool {
 	var netErr net.Error
 	if errors.As(err, &netErr) {
 		return netErr.Timeout()
-	}
-	return false
-}
-
-func errorContains(err error, substr string) bool {
-	if err == nil {
-		return false
-	}
-	return contains(err.Error(), substr)
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && searchString(s, substr)
-}
-
-func searchString(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
 	}
 	return false
 }

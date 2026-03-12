@@ -42,8 +42,14 @@ func walkToTopmostClaude(pid int, tableFn func() (map[int]processEntry, error)) 
 
 	topmostClaude := 0
 	current := pid
+	visited := make(map[int]bool, 10)
 
 	for range 10 { // safety bound — process trees are shallow
+		if visited[current] {
+			break // cycle detected
+		}
+		visited[current] = true
+
 		entry, ok := table[current]
 		if !ok {
 			break

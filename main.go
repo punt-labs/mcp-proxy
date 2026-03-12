@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -29,7 +28,7 @@ func run() int {
 	rawURL := os.Args[1]
 
 	logger, logCloser := debuglog.FromEnv()
-	defer logCloser.(io.Closer).Close()
+	defer logCloser.Close()
 
 	// First signal cancels context (graceful shutdown).
 	// Second signal force-exits immediately.
