@@ -17,11 +17,15 @@ Claude Code ◄──────────────► mcp-proxy ◄──
 
 ## Install
 
-### Homebrew (macOS)
+### Via quarry (recommended)
+
+If you use [quarry](https://github.com/punt-labs/quarry), it installs mcp-proxy automatically:
 
 ```bash
-brew install punt-labs/tap/mcp-proxy
+quarry install
 ```
+
+This downloads the correct binary, verifies its SHA256 checksum, and places it in `~/.local/bin/`.
 
 ### Go
 
@@ -36,7 +40,7 @@ Download from [GitHub Releases](https://github.com/punt-labs/mcp-proxy/releases)
 ```bash
 curl -fsSL https://github.com/punt-labs/mcp-proxy/releases/latest/download/mcp-proxy-darwin-arm64 -o mcp-proxy
 chmod +x mcp-proxy
-sudo mv mcp-proxy /usr/local/bin/
+mv mcp-proxy ~/.local/bin/
 ```
 
 Replace `darwin-arm64` with your platform: `darwin-amd64`, `linux-arm64`, `linux-amd64`.
@@ -44,7 +48,7 @@ Replace `darwin-arm64` with your platform: `darwin-amd64`, `linux-arm64`, `linux
 ## Usage
 
 ```bash
-mcp-proxy ws://localhost:8080/mcp
+mcp-proxy ws://localhost:8420/mcp
 ```
 
 The proxy reads JSON-RPC from stdin, forwards each line as a WebSocket text message to the daemon, and writes daemon responses to stdout. Messages are opaque — no parsing, no transformation.
@@ -59,7 +63,7 @@ Replace the direct MCP server command with the proxy:
     "quarry": {
       "type": "stdio",
       "command": "mcp-proxy",
-      "args": ["ws://localhost:8080/mcp"]
+      "args": ["ws://localhost:8420/mcp"]
     }
   }
 }
@@ -68,8 +72,8 @@ Replace the direct MCP server command with the proxy:
 ### Debug Logging
 
 ```bash
-MCP_PROXY_DEBUG=1 mcp-proxy ws://localhost:8080/mcp       # Log to temp file
-MCP_PROXY_DEBUG=/tmp/proxy.log mcp-proxy ws://...          # Log to specific file
+MCP_PROXY_DEBUG=1 mcp-proxy ws://localhost:8420/mcp              # Log to temp file
+MCP_PROXY_DEBUG=.tmp/proxy.log mcp-proxy ws://localhost:8420/mcp # Log to specific file
 ```
 
 Logs include message sizes, connection events, and error details. Stdout is never polluted — all diagnostics go to the debug log file.
