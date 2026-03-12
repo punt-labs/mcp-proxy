@@ -28,6 +28,38 @@ func TestDial_Success(t *testing.T) {
 	assert.Equal(t, "12345", d.SessionKey())
 }
 
+func TestDial_BearerToken(t *testing.T) {
+	d := testutil.NewMockDaemon()
+	defer d.Close()
+
+	t.Setenv("MCP_PROXY_TOKEN", "test-secret-key")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	logger := debuglog.NewTestLogger(t).Logger
+	conn, err := transport.Dial(ctx, d.URL(), 12345, logger)
+	require.NoError(t, err)
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	assert.Equal(t, "Bearer test-secret-key", d.AuthHeader())
+}
+
+func TestDial_NoBearerTokenByDefault(t *testing.T) {
+	d := testutil.NewMockDaemon()
+	defer d.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	logger := debuglog.NewTestLogger(t).Logger
+	conn, err := transport.Dial(ctx, d.URL(), 12345, logger)
+	require.NoError(t, err)
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	assert.Empty(t, d.AuthHeader())
+}
+
 func TestDial_InvalidURL(t *testing.T) {
 	tests := []struct {
 		name string

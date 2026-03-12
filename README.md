@@ -34,12 +34,15 @@ Optionally, the daemon can:
 
 ### Authentication
 
-The proxy does not add authentication headers to the WebSocket upgrade. If your daemon requires auth, it should either:
+For remote daemons or daemons that require API keys, set `MCP_PROXY_TOKEN`:
 
-- **Trust localhost connections** — appropriate when the daemon only binds to `127.0.0.1` (the default for most MCP servers)
-- **Use the session key** — the `?session_key=<pid>` query parameter can serve as a lightweight identity mechanism for local daemons
+```bash
+MCP_PROXY_TOKEN=your-api-key mcp-proxy wss://remote-host/mcp
+```
 
-Remote or multi-user deployments requiring bearer tokens or mTLS are not yet supported.
+The proxy sends this as `Authorization: Bearer <token>` on the WebSocket upgrade request.
+
+For local daemons, auth is typically unnecessary — binding to `127.0.0.1` (the default) is sufficient. The `?session_key=<pid>` query parameter can serve as lightweight per-session identity without requiring a shared secret.
 
 ## Install
 

@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -72,9 +74,17 @@ func Dial(ctx context.Context, rawURL string, sessionKey int, logger *slog.Logge
 	dialCtx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
 
-	conn, _, err := websocket.Dial(dialCtx, u.String(), &websocket.DialOptions{
+	opts := &websocket.DialOptions{
 		Subprotocols: []string{"mcp"},
-	})
+	}
+	if token := os.Getenv("MCP_PROXY_TOKEN"); token != "" {
+		opts.HTTPHeader = http.Header{
+			"Authorization": []string{"Bearer " + token},
+		}
+		logger.Debug("using bearer token from MCP_PROXY_TOKEN")
+	}
+
+	conn, _, err := websocket.Dial(dialCtx, u.String(), opts)
 	if err != nil {
 		addr := u.Host
 

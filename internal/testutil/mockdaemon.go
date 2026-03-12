@@ -25,6 +25,7 @@ type MockDaemon struct {
 
 	mu           sync.Mutex
 	sessionKey   string
+	authHeader   string
 	received     [][]byte
 	connected    bool
 	disconnected bool
@@ -53,6 +54,13 @@ func (d *MockDaemon) SessionKey() string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.sessionKey
+}
+
+// AuthHeader returns the Authorization header received on the last connection upgrade.
+func (d *MockDaemon) AuthHeader() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.authHeader
 }
 
 // Received returns a copy of all messages received by the daemon.
@@ -98,6 +106,7 @@ func (d *MockDaemon) CloseConn() {
 func (d *MockDaemon) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	d.mu.Lock()
 	d.sessionKey = r.URL.Query().Get("session_key")
+	d.authHeader = r.Header.Get("Authorization")
 	d.mu.Unlock()
 
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
