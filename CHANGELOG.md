@@ -20,3 +20,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Hardening tests: 1MB boundary, broken stdout, partial line + EOF, exit timing
 - GitHub Actions release workflow — cross-compile + SHA256 checksums on `v*` tags
 - Install docs: Homebrew, `go install`, binary download
+- Quarry integration tests: real MCP roundtrip through proxy to quarry daemon
+
+### Fixed
+
+- WebSocket dial now negotiates `mcp` subprotocol (required by MCP SDK WebSocket transport)
