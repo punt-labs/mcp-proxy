@@ -8,7 +8,7 @@ There is no such thing as a "pre-existing" issue. If you see a problem — in co
 
 ## Project State
 
-**Design phase.** README.md contains the full design spec. No code written yet.
+**Core implemented.** Bidirectional stdio-to-WebSocket bridge with session identity, debug logging, and signal handling. Slices 0–3 complete, slice 6 partial. Integration tests (slices 4–5) blocked on quarry/biff WebSocket endpoints.
 
 The binary is `mcp-proxy`. Invocation: `mcp-proxy <daemon-url>`. Example: `mcp-proxy ws://localhost:8080/mcp`.
 
