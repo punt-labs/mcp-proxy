@@ -197,6 +197,7 @@ func (d *MockDaemon) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// Read loop: reads from conn, sends responses via writes channel.
+readLoop:
 	for {
 		_, msg, err := conn.Read(ctx)
 		if err != nil {
@@ -219,7 +220,7 @@ func (d *MockDaemon) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			select {
 			case writes <- resp:
 			case <-ctx.Done():
-				return
+				break readLoop
 			}
 		}
 	}
