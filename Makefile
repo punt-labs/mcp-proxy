@@ -1,4 +1,4 @@
-.PHONY: vet test test-race test-e2e test-cover build clean
+.PHONY: vet test test-race test-e2e test-cover check build clean dist cover
 
 vet:
 	go vet ./...
@@ -9,9 +9,11 @@ test: vet
 test-e2e: build
 	go test -race -count=1 -tags=e2e ./internal/e2e/...
 
-test-cover:
+cover:
 	go test -cover -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out
+
+check: vet test
 
 build:
 	go build -o mcp-proxy .
