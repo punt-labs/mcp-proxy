@@ -171,9 +171,13 @@ func (d *MockDaemon) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				return
 			case msg := <-writes:
 				if err := conn.Write(ctx, websocket.MessageText, msg); err != nil {
+					if ctx.Err() != nil {
+						return
+					}
 					d.mu.Lock()
 					d.pushErr = err
 					d.mu.Unlock()
+					cancel() // unblock all goroutines on this connection
 					return
 				}
 			}
