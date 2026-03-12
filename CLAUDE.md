@@ -8,9 +8,9 @@ There is no such thing as a "pre-existing" issue. If you see a problem — in co
 
 ## Project State
 
-**Core implemented.** Bidirectional stdio-to-WebSocket bridge with session identity, debug logging, and signal handling. Slices 0–3 complete, slice 6 partial. Integration tests (slices 4–5) blocked on quarry/biff WebSocket endpoints.
+**Core implemented.** Bidirectional stdio-to-WebSocket bridge with session identity, debug logging, signal handling, automatic reconnect with backoff, and health check. Integration tests blocked on quarry/biff WebSocket endpoints.
 
-The binary is `mcp-proxy`. Invocation: `mcp-proxy <daemon-url>`. Example: `mcp-proxy ws://localhost:8080/mcp`.
+The binary is `mcp-proxy`. Invocation: `mcp-proxy <daemon-url>`. Health check: `mcp-proxy --health <daemon-url>`.
 
 Check `bd ready` for current unblocked work.
 
@@ -37,13 +37,16 @@ The proxy is transparent — it doesn't know what MCP tools exist. JSON-RPC mess
 
 ### Package Map
 
-Expected layout (not yet implemented):
-
 | Package | What It Does |
 |---------|-------------|
-| `main` | Entry point; stdio ↔ daemon bridge |
+| `main` | Entry point: parse args, health check, reconnecting proxy, signal handling |
+| `internal/bridge` | Bidirectional stdin↔WebSocket forwarding (two goroutines + WaitGroup) |
+| `internal/reconnect` | Reconnecting bridge: stdin channel, per-connection goroutines, backoff |
+| `internal/transport` | WebSocket dial with typed errors, session key injection, bearer token auth |
 | `internal/session` | Process-tree walking to resolve Claude session key |
-| `internal/transport` | Daemon connection (WebSocket or Unix socket) |
+| `internal/debuglog` | Structured `slog` debug logging via `MCP_PROXY_DEBUG` env var |
+| `internal/testutil` | Mock daemon (`httptest.Server` + WebSocket), stdio pipe helpers |
+| `internal/e2e` | Black-box binary tests (build tag `e2e`) |
 
 ## Go Standards
 

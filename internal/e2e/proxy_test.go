@@ -80,7 +80,11 @@ func TestProxy_E2E_RequestResponse(t *testing.T) {
 	stdinPipe.Close()
 	err = cmd.Wait()
 	assert.NoError(t, err, "stderr: %s", stderr.String())
-	assert.JSONEq(t, `{"jsonrpc":"2.0","method":"ping","id":1}`, strings.TrimSpace(stdout.String()))
+	// stdout may have "connected" on stderr plus the echoed JSON on stdout.
+	// Split stdout lines and find the JSON one.
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	require.Len(t, lines, 1)
+	assert.JSONEq(t, `{"jsonrpc":"2.0","method":"ping","id":1}`, lines[0])
 }
 
 func TestProxy_E2E_SessionKey(t *testing.T) {
@@ -125,10 +129,10 @@ func TestProxy_E2E_NoArgs(t *testing.T) {
 	assert.Contains(t, stderr.String(), "Usage:")
 }
 
-func TestProxy_E2E_ConnectionRefused(t *testing.T) {
+func TestProxy_E2E_ConnectionRefused_Reconnects(t *testing.T) {
 	bin := binaryPath(t)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, bin, "ws://127.0.0.1:1/mcp")
@@ -137,11 +141,54 @@ func TestProxy_E2E_ConnectionRefused(t *testing.T) {
 	stderr := &testutil.SafeBuffer{}
 	cmd.Stderr = stderr
 
+	_ = cmd.Run()
+	// With reconnect, the proxy retries until the context times out.
+	// Verify it printed retry messages to stderr.
+	assert.Contains(t, stderr.String(), "retrying")
+}
+
+func TestProxy_E2E_HealthCheckSuccess(t *testing.T) {
+	bin := binaryPath(t)
+	d := testutil.NewMockDaemon()
+	defer d.Close()
+
+	cmd := exec.Command(bin, "--health", d.URL())
+	stderr := &testutil.SafeBuffer{}
+	cmd.Stderr = stderr
+
+	err := cmd.Run()
+	assert.NoError(t, err, "stderr: %s", stderr.String())
+	assert.Contains(t, stderr.String(), "ok")
+}
+
+func TestProxy_E2E_HealthCheckFailure(t *testing.T) {
+	bin := binaryPath(t)
+
+	cmd := exec.Command(bin, "--health", "ws://127.0.0.1:1/mcp")
+	stderr := &testutil.SafeBuffer{}
+	cmd.Stderr = stderr
+
 	err := cmd.Run()
 	assert.Error(t, err)
 	if exitErr, ok := err.(*exec.ExitError); ok {
 		assert.Equal(t, 1, exitErr.ExitCode())
 	}
+	assert.Contains(t, stderr.String(), "health check failed")
+}
+
+func TestProxy_E2E_HealthCheckNoURL(t *testing.T) {
+	bin := binaryPath(t)
+
+	cmd := exec.Command(bin, "--health")
+	stderr := &testutil.SafeBuffer{}
+	cmd.Stderr = stderr
+
+	err := cmd.Run()
+	assert.Error(t, err)
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		assert.Equal(t, 2, exitErr.ExitCode())
+	}
+	assert.Contains(t, stderr.String(), "Usage")
 }
 
 func TestProxy_E2E_MultipleMessages(t *testing.T) {

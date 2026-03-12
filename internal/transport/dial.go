@@ -16,7 +16,8 @@ import (
 	"nhooyr.io/websocket"
 )
 
-const dialTimeout = 5 * time.Second
+// DialTimeout is the maximum duration for a WebSocket dial attempt.
+const DialTimeout = 5 * time.Second
 
 // ConnectionRefusedError indicates the daemon is not listening.
 type ConnectionRefusedError struct {
@@ -71,7 +72,7 @@ func Dial(ctx context.Context, rawURL string, sessionKey int, logger *slog.Logge
 
 	logger.Debug("dialing daemon", "host", u.Host, "session_key", sessionKey)
 
-	dialCtx, cancel := context.WithTimeout(ctx, dialTimeout)
+	dialCtx, cancel := context.WithTimeout(ctx, DialTimeout)
 	defer cancel()
 
 	opts := &websocket.DialOptions{

@@ -25,8 +25,9 @@ The proxy is transparent — it doesn't parse, validate, or transform JSON-RPC m
 
 | Package | What It Does |
 |---------|-------------|
-| `main` | Entry point: parse args, dial, bridge, signal handling |
+| `main` | Entry point: parse args, health check, reconnecting proxy, signal handling |
 | `internal/bridge` | Bidirectional stdin↔WebSocket forwarding (two goroutines + WaitGroup) |
+| `internal/reconnect` | Reconnecting bridge: stdin channel, per-connection goroutines, backoff |
 | `internal/transport` | WebSocket dial with typed errors, session key injection, bearer token auth |
 | `internal/session` | Process-tree walking to resolve Claude Code session key |
 | `internal/debuglog` | Structured `slog` debug logging via `MCP_PROXY_DEBUG` env var |
@@ -318,10 +319,83 @@ Display server already exists as a persistent Unix socket server (length-prefixe
 
 ---
 
+## DES-009: Reconnect on Daemon Disconnect
+
+**Date:** 2026-03-12
+**Status:** SETTLED
+**Topic:** Proxy behavior when the daemon restarts or disconnects
+
+### Design
+
+The proxy reconnects automatically with exponential backoff (250ms, 500ms, 1s, 2s, 4s, 5s cap). Messages are preserved across reconnects — no data loss. Implemented in `internal/reconnect`.
+
+### Why bridge.Run Can't Be Looped
+
+`bridge.Run`'s daemon reader goroutine closes stdin to unblock the scanner on disconnect. Once `os.Stdin` is closed, it can't be reopened. A simple `for { dial(); bridge.Run() }` loop breaks on the second iteration.
+
+### Architecture
+
+```text
+os.Stdin → [stdin goroutine] → chan []byte → [writer] → conn → daemon
+                                                          ↑ new conn on reconnect
+daemon → conn → [reader goroutine] → stdout
+          ↑ new goroutine on reconnect
+```
+
+**Stdin goroutine** (process lifetime): reads lines via `bufio.Scanner`, copies bytes, sends to buffered channel. Closes channel on EOF.
+
+**Per-connection**: writer reads from channel, writes to conn. Reader reads from conn, writes to stdout. Either can trigger reconnect.
+
+**Message preservation**: if `conn.Write` fails, the consumed line is returned as `pending` and retried on the next connection. When the reader detects disconnect (cancels `connCtx`), no line was consumed from the channel — nothing lost.
+
+### Key Coordination Detail
+
+The reader goroutine cancels `connCtx` when it detects daemon disconnect. This unblocks the writer's `select` on `<-connCtx.Done()`. The main loop then calls `conn.CloseNow()` and waits for the reader to exit before starting a new connection (no concurrent stdout writes).
+
+On stdin EOF, the writer cancels `connCtx` to unblock the reader's `conn.Read()`, then waits for it to exit. This prevents the 5-second stall that would occur if the deferred `connCancel` ran after `<-readerDone`.
+
+### Rejected: Looping bridge.Run
+
+Stdin close is irreversible. Even with an `io.Pipe` wrapper, the bridge's "close stdin to unblock scanner" pattern is fundamentally at odds with process-lifetime stdin reading.
+
+### Rejected: Separate Reconnect Binary
+
+A wrapper script that restarts the proxy would lose in-flight messages and require re-resolving the session key. Reconnect belongs inside the proxy.
+
+### Trade-off Accepted
+
+The `internal/bridge` package remains unchanged — it's still the right primitive for unit testing the bidirectional forwarding logic in isolation. The reconnect package is a higher-level coordinator that uses the same WebSocket operations but manages connection lifecycle.
+
+---
+
+## DES-010: Health Check Flag
+
+**Date:** 2026-03-12
+**Status:** SETTLED
+**Topic:** Liveness probe for daemon availability
+
+### Design
+
+`mcp-proxy --health <url>` — dial with session key 0, close immediately, exit 0/1. Prints `mcp-proxy: ok` or `mcp-proxy: health check failed: <error>` to stderr. 5s timeout (matches `DialTimeout`).
+
+### Why
+
+Three consumers need daemon liveness checks:
+
+1. **`quarry doctor`** — health check in CLI diagnostics
+2. **launchd `KeepAlive`** — restart daemon if not responding
+3. **CI** — verify daemon is running before test suite
+
+### Rejected: Separate Health Check Binary
+
+A `mcp-proxy-health` binary would duplicate URL parsing, auth setup, and transport code. A single flag on the existing binary is simpler and ensures the health check uses the same transport path as the proxy.
+
+---
+
 ## Open Questions
 
-1. **Daemon auto-start.** Proxy starts daemon if missing, or always user's responsibility? (Currently: fail fast, per DES-005.)
-2. **Graceful degradation.** Daemon down → fall back to in-process server, or fail fast? (Currently: fail fast.)
+1. ~~**Daemon auto-start.** Proxy starts daemon if missing, or always user's responsibility?~~ Settled: no auto-start (DES-005), but reconnect with backoff (DES-009) handles daemon restarts transparently.
+2. ~~**Graceful degradation.** Daemon down → fall back to in-process server, or fail fast?~~ Settled: reconnect with backoff (DES-009). No in-process fallback.
 3. **Lux daemon identity.** `lux serve` becomes the shared daemon, or MCP added to display server directly?
 4. **Hook CLI forwarding.** `vox play` and `lux hook post-bash` — forward to daemon, or work independently?
 5. ~~**WebSocket over Unix socket vs TCP.**~~ Settled by DES-001: WebSocket over TCP localhost. URLs are simpler (`ws://localhost:8420/mcp`), and TCP allows remote daemons (enabled by DES-007 bearer auth).

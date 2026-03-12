@@ -265,11 +265,18 @@ func TestHardening_PartialLineBeforeEOF(t *testing.T) {
 	err = <-done
 	assert.NoError(t, err)
 
-	// The partial line should have been forwarded to the daemon.
-	// (The echo may or may not arrive before bridge shutdown — that's a race.
-	// What matters is the proxy forwarded it.)
+	// The bridge writes the partial line before cancelling its context.
+	// The daemon may not have processed the read yet — give it a moment.
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if len(d.Received()) >= 2 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
 	received := d.Received()
-	assert.Len(t, received, 2, "partial line before EOF should still be forwarded to daemon")
+	require.Len(t, received, 2, "partial line before EOF should still be forwarded to daemon")
 	assert.Equal(t, `{"jsonrpc":"2.0","method":"ping","id":2}`, string(received[1]))
 }
 

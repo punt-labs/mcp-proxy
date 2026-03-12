@@ -30,6 +30,7 @@ type MockDaemon struct {
 	connected    bool
 	disconnected bool
 	conn         *websocket.Conn
+	connCount    int
 }
 
 // NewMockDaemon creates and starts a mock daemon server.
@@ -86,6 +87,13 @@ func (d *MockDaemon) Disconnected() bool {
 	return d.disconnected
 }
 
+// ConnCount returns the total number of WebSocket connections accepted.
+func (d *MockDaemon) ConnCount() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.connCount
+}
+
 // Close shuts down the mock daemon.
 func (d *MockDaemon) Close() {
 	d.CloseConn()
@@ -121,6 +129,7 @@ func (d *MockDaemon) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	d.mu.Lock()
 	d.connected = true
 	d.conn = conn
+	d.connCount++
 	d.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(r.Context())

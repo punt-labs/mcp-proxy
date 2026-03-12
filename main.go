@@ -2,31 +2,61 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/punt-labs/mcp-proxy/internal/bridge"
 	"github.com/punt-labs/mcp-proxy/internal/debuglog"
+	"github.com/punt-labs/mcp-proxy/internal/reconnect"
 	"github.com/punt-labs/mcp-proxy/internal/session"
 	"github.com/punt-labs/mcp-proxy/internal/transport"
 )
 
-const usage = "Usage: mcp-proxy <daemon-url>\n\nExample: mcp-proxy ws://localhost:8080/mcp\n"
+const usage = `Usage: mcp-proxy [--health] <daemon-url>
+
+Example: mcp-proxy ws://localhost:8080/mcp
+         mcp-proxy --health ws://localhost:8080/mcp
+`
 
 func main() {
 	os.Exit(run())
 }
 
 func run() int {
-	if len(os.Args) != 2 {
+	args := os.Args[1:]
+
+	if len(args) >= 1 && args[0] == "--health" {
+		if len(args) != 2 {
+			fmt.Fprint(os.Stderr, usage)
+			return 2
+		}
+		return runHealthCheck(args[1])
+	}
+	if len(args) != 1 {
 		fmt.Fprint(os.Stderr, usage)
 		return 2
 	}
-	rawURL := os.Args[1]
+	return runProxy(args[0])
+}
 
+func runHealthCheck(rawURL string) int {
+	logger := debuglog.Nop()
+
+	ctx, cancel := context.WithTimeout(context.Background(), transport.DialTimeout)
+	defer cancel()
+
+	conn, err := transport.Dial(ctx, rawURL, 0, logger)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mcp-proxy: health check failed: %v\n", err)
+		return 1
+	}
+	conn.CloseNow()
+	fmt.Fprintln(os.Stderr, "mcp-proxy: ok")
+	return 0
+}
+
+func runProxy(rawURL string) int {
 	logger, logCloser := debuglog.FromEnv()
 	defer logCloser.Close()
 
@@ -39,25 +69,17 @@ func run() int {
 	sessionKey := session.FindSessionKey()
 	logger.Debug("session key resolved", "key", sessionKey)
 
-	conn, err := transport.Dial(ctx, rawURL, sessionKey, logger)
-	if err != nil {
-		var connErr *transport.ConnectionRefusedError
-		var urlErr *transport.InvalidURLError
-		var timeErr *transport.TimeoutError
-		switch {
-		case errors.As(err, &connErr):
-			fmt.Fprintf(os.Stderr, "mcp-proxy: connection refused: %s\n", connErr.Addr)
-		case errors.As(err, &urlErr):
-			fmt.Fprintf(os.Stderr, "mcp-proxy: invalid URL: %s\n", urlErr.URL)
-		case errors.As(err, &timeErr):
-			fmt.Fprintf(os.Stderr, "mcp-proxy: connection timed out: %s\n", timeErr.Addr)
-		default:
-			fmt.Fprintf(os.Stderr, "mcp-proxy: %v\n", err)
+	dial := func(dialCtx context.Context) (reconnect.Conn, error) {
+		conn, err := transport.Dial(dialCtx, rawURL, sessionKey, logger)
+		if err != nil {
+			return nil, err
 		}
-		return 1
+		// MCP messages can be large (tool responses with embedded data).
+		conn.SetReadLimit(1024 * 1024) // 1MB
+		return conn, nil
 	}
 
-	err = bridge.Run(ctx, os.Stdin, os.Stdout, conn, logger)
+	err := reconnect.Run(ctx, os.Stdin, os.Stdout, dial, logger)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mcp-proxy: %v\n", err)
 		return 1

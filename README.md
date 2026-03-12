@@ -25,7 +25,7 @@ Your MCP server must:
 
 1. **Accept WebSocket connections** with the `mcp` subprotocol (`Sec-WebSocket-Protocol: mcp`)
 2. **Speak MCP JSON-RPC 2.0** — one JSON object per WebSocket text frame
-3. **Be running before the proxy connects** — the proxy fails fast if the daemon is unreachable (no auto-start, no retries)
+3. **Be running before the proxy connects** — the proxy retries with backoff if the daemon is unreachable, but does not auto-start it
 
 Optionally, the daemon can:
 
@@ -76,6 +76,25 @@ mcp-proxy ws://localhost:8420/mcp
 
 The proxy reads JSON-RPC from stdin, forwards each line as a WebSocket text message to the daemon, and writes daemon responses to stdout. Messages are opaque — no parsing, no transformation.
 
+### Reconnect
+
+If the daemon disconnects (restart, crash), the proxy reconnects automatically with exponential backoff (250ms → 5s cap). Messages queued during disconnect are preserved and delivered on the next connection. Status is printed to stderr:
+
+```text
+mcp-proxy: connected
+mcp-proxy: daemon disconnected, reconnecting...
+mcp-proxy: daemon unreachable, retrying in 250ms...
+mcp-proxy: connected
+```
+
+### Health Check
+
+```bash
+mcp-proxy --health ws://localhost:8420/mcp
+```
+
+Dials the daemon, closes immediately, exits 0 on success or 1 on failure. Prints `mcp-proxy: ok` or `mcp-proxy: health check failed: <error>` to stderr. Useful for `quarry doctor`, launchd `KeepAlive`, and CI.
+
 ### MCP Server Configuration
 
 Replace the direct MCP server command with the proxy:
@@ -105,8 +124,8 @@ Logs include message sizes, connection events, and error details. Stdout is neve
 
 | Code | Meaning |
 |------|---------|
-| 0 | Clean shutdown (stdin EOF) |
-| 1 | Connection failed or runtime error |
+| 0 | Clean shutdown (stdin EOF), or health check success |
+| 1 | Runtime error, or health check failure |
 | 2 | Usage error (wrong arguments) |
 
 ### Signal Handling

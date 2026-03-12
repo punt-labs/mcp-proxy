@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Automatic reconnect with exponential backoff when daemon disconnects (250ms–5s)
+- Message preservation across reconnects — no messages lost during daemon restart
+- `--health` flag for liveness probes (`mcp-proxy --health ws://localhost:8420/mcp`)
 - Bidirectional JSON-RPC forwarding between stdio and WebSocket daemon
 - Session identity resolution via process tree walking (ported from biff)
 - WebSocket transport with typed connection errors
@@ -26,3 +29,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - WebSocket dial now negotiates `mcp` subprotocol (required by MCP SDK WebSocket transport)
+- Flaky `TestHardening_PartialLineBeforeEOF` — poll daemon received messages instead of asserting immediately after bridge shutdown
