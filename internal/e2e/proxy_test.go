@@ -132,7 +132,8 @@ func TestProxy_E2E_NoArgs(t *testing.T) {
 func TestProxy_E2E_ConnectionRefused_Reconnects(t *testing.T) {
 	bin := binaryPath(t)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// 1s is enough: first retry message appears at 250ms backoff.
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, bin, "ws://127.0.0.1:1/mcp")

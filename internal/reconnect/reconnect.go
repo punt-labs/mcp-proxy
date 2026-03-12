@@ -14,7 +14,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"sync"
 	"time"
 
 	"nhooyr.io/websocket"
@@ -146,9 +145,9 @@ func runConnection(
 	defer connCancel()
 
 	readerDone := make(chan error, 1)
-	var stdoutMu sync.Mutex
 
 	// Reader goroutine: daemon → stdout.
+	// Only this goroutine writes to stdout — no mutex needed.
 	go func() {
 		defer connCancel() // signal writer to stop on disconnect
 		for {
@@ -163,9 +162,7 @@ func runConnection(
 			}
 			logger.Debug("daemon→stdout", "size", len(msg))
 
-			stdoutMu.Lock()
 			_, writeErr := fmt.Fprintf(stdout, "%s\n", msg)
-			stdoutMu.Unlock()
 			if writeErr != nil {
 				readerDone <- fmt.Errorf("writing to stdout: %w", writeErr)
 				return
