@@ -53,24 +53,11 @@ For local daemons, auth is typically unnecessary — binding to `127.0.0.1` (the
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/punt-labs/mcp-proxy/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/punt-labs/mcp-proxy/65d3e15/install.sh | sh
 ```
 
-Detects your platform, downloads the binary from [GitHub Releases](https://github.com/punt-labs/mcp-proxy/releases) with SHA256 verification, and registers the Punt Labs marketplace.
-
-### Alternative methods
-
-**Go install:**
-
-```bash
-go install github.com/punt-labs/mcp-proxy@latest
-```
-
-**Via quarry:**
-
-If you use [quarry](https://github.com/punt-labs/quarry), `quarry install` downloads mcp-proxy automatically (SHA256-verified, correct platform).
-
-**Manual download:**
+<details>
+<summary>Manual install</summary>
 
 ```bash
 curl -fsSL https://github.com/punt-labs/mcp-proxy/releases/latest/download/mcp-proxy-darwin-arm64 -o mcp-proxy
@@ -79,6 +66,20 @@ mv mcp-proxy ~/.local/bin/
 ```
 
 Replace `darwin-arm64` with your platform: `darwin-amd64`, `linux-arm64`, `linux-amd64`.
+
+</details>
+
+<details>
+<summary>Verify before running</summary>
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/punt-labs/mcp-proxy/65d3e15/install.sh -o install.sh
+shasum -a 256 install.sh
+cat install.sh
+sh install.sh
+```
+
+</details>
 
 ## Usage
 
