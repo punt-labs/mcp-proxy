@@ -139,10 +139,15 @@ func runHook(rawURL string, event string, async bool) int {
 		fmt.Fprintf(os.Stderr, "mcp-proxy: hook mode expects a base URL (e.g., ws://host:port), got path %q\n", u.Path)
 		return 2
 	}
-	hookURL, err := appendPath(rawURL, "hook")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "mcp-proxy: invalid URL: %v\n", err)
-		return 2
+	var hookURL string
+	if trimmedPath == "/hook" {
+		hookURL = rawURL
+	} else {
+		hookURL, err = appendPath(rawURL, "hook")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "mcp-proxy: invalid URL: %v\n", err)
+			return 2
+		}
 	}
 
 	// Dial with standard timeout.
