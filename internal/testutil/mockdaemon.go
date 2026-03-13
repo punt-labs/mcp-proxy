@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"sync"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 // MockDaemon is an httptest.Server that upgrades to WebSocket at /mcp.
@@ -159,7 +159,7 @@ func (d *MockDaemon) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	// All outbound messages go through this channel so there is only one
-	// concurrent writer on the conn (nhooyr/websocket guarantees one reader
+	// concurrent writer on the conn (coder/websocket guarantees one reader
 	// + one writer, not two writers).
 	writes := make(chan []byte, 100)
 

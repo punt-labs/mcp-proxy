@@ -16,7 +16,7 @@ import (
 	"github.com/punt-labs/mcp-proxy/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 // Partition 10: Shutdown via context cancellation (models causeSignal).
@@ -48,7 +48,7 @@ func TestPartition10_ShutdownViaContextCancel(t *testing.T) {
 	cancel()
 
 	select {
-	case err = <-done:
+	case <-done:
 		// Bridge should exit. Context cancellation is not a clean EOF,
 		// so the bridge may return an error (daemon read fails) or nil
 		// (scanner exits on closed stdin). Either is acceptable — the

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 // DialTimeout is the maximum duration for a WebSocket dial attempt.
