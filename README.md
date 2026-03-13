@@ -5,15 +5,21 @@
 [![License](https://img.shields.io/github/license/punt-labs/mcp-proxy)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/punt-labs/mcp-proxy/test.yml?label=CI)](https://github.com/punt-labs/mcp-proxy/actions/workflows/test.yml)
 
-Claude Code spawns a fresh MCP server process for every session. If you open three terminal tabs, you get three copies of your server — three copies of its models, connections, and state. When the server is heavy (an ML embedding model, a database connection pool, a NATS relay), this wastes hundreds of megabytes of memory and adds seconds of startup time to each session.
+Claude Code spawns a fresh MCP server process for every session. If your server loads an ML model, opens a database pool, or holds a NATS connection, each session duplicates all of it. A memory leak in the server leaks inside Claude Code's process tree. A hang in the server freezes the session. A crash takes it down entirely.
 
-mcp-proxy fixes this. Instead of spawning the real server, Claude Code spawns a tiny Go binary (~5MB, <10ms startup) that forwards MCP messages over WebSocket to a single shared daemon:
+mcp-proxy puts a process boundary between Claude Code and your MCP server. Instead of spawning the real server, Claude Code spawns a tiny Go binary (~5MB, <10ms startup) that forwards MCP messages over WebSocket to a single shared daemon:
 
 ```text
                     stdio                      WebSocket
 Claude Code ◄──────────────► mcp-proxy ◄──────────────────────► daemon
              MCP JSON-RPC                                       (one process)
 ```
+
+**Runtime protection.** The proxy is a static Go binary with no allocations on the message path. If the daemon leaks memory, crashes, or hangs, Claude Code is unaffected — the proxy reconnects automatically and the session continues.
+
+**Shared state.** Three terminal tabs share one daemon process instead of three copies of your models, connections, and state. One embedding model in memory, one connection pool, one audio device.
+
+**Hook speed.** Claude Code hook scripts have a ~100ms budget. Python CLI imports (loading nats, pydantic, lancedb) take 300ms-3.7s. The proxy's `--hook` mode relays JSON-RPC to the daemon in ~15ms — the hook runs its logic on the daemon side where everything is already loaded.
 
 The proxy works with **any MCP server** that exposes a WebSocket endpoint speaking MCP JSON-RPC — it never inspects message content. Your server doesn't need to be modified; it just needs a WebSocket transport in addition to (or instead of) stdio.
 
@@ -217,7 +223,7 @@ See [DESIGN.md](DESIGN.md) for the decision log covering transport selection, se
 <details>
 <summary>When does an MCP server need a proxy?</summary>
 
-A proxy makes sense when your MCP server has **expensive startup**, **heavy shared state**, or **needs server push**:
+A proxy makes sense when your MCP server has **expensive startup**, **heavy shared state**, **needs server push**, or **you want process isolation from Claude Code**:
 
 | Symptom | Without Proxy | With Proxy |
 |---------|--------------|------------|
@@ -225,8 +231,11 @@ A proxy makes sense when your MCP server has **expensive startup**, **heavy shar
 | Database connection pools | N sessions = N pools | One pool, N lightweight proxies |
 | Singleton resources (audio device, display) | File lock contention between sessions | Single owner, proxy multiplexes access |
 | Server-initiated notifications | Not possible with stdio (client must poll) | Daemon pushes via WebSocket, proxy writes to stdout |
+| Memory leaks in MCP server | Leaks inside Claude Code's process tree | Leaks isolated to daemon process |
+| MCP server crash | Claude Code session dies | Proxy reconnects, session continues |
+| Hook scripts need daemon access | Python imports blow 100ms hook budget | ~15ms Go binary relay via `--hook` |
 
-If your MCP server is stateless and starts in <100ms, you don't need a proxy — direct stdio is simpler.
+If your MCP server is stateless, starts in <100ms, and you don't use hooks that need daemon access, you don't need a proxy — direct stdio is simpler.
 
 </details>
 

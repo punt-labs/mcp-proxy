@@ -38,8 +38,9 @@ mcp-proxy --health ws://host/mcp ──► dial + close ──► exit 0/1
 
 | Package | What It Does |
 |---------|-------------|
-| `main` | Entry point: parse args, health check, reconnecting proxy, signal handling |
+| `main` | Entry point: parse args, health check, hook relay, reconnecting proxy, signal handling |
 | `internal/bridge` | Bidirectional stdin↔WebSocket forwarding (two goroutines + WaitGroup) |
+| `internal/hook` | One-shot JSON-RPC relay for hook scripts (sync request/response, async notification) |
 | `internal/reconnect` | Reconnecting bridge: stdin channel, per-connection goroutines, backoff |
 | `internal/transport` | WebSocket dial with typed errors, session key injection, bearer token auth |
 | `internal/session` | Process-tree walking to resolve Claude Code session key |
