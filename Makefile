@@ -1,13 +1,11 @@
 .PHONY: help lint docs test test-e2e check format build clean dist cover
 
-GOBIN := $(or $(shell go env GOBIN),$(shell go env GOPATH)/bin)
-
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
 
 lint: ## Lint (go vet + staticcheck)
 	go vet ./...
-	$(GOBIN)/staticcheck ./...
+	go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
 
 docs: ## Lint markdown
 	npx --yes markdownlint-cli2 "**/*.md" "#node_modules"
