@@ -141,7 +141,8 @@ func runHook(rawURL string, event string, async bool) int {
 	}
 	var hookURL string
 	if trimmedPath == "/hook" {
-		hookURL = rawURL
+		u.Path = "/hook"
+		hookURL = u.String()
 	} else {
 		hookURL, err = appendPath(rawURL, "hook")
 		if err != nil {
