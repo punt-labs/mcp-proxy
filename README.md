@@ -15,7 +15,7 @@ Claude Code ◄──────────────► mcp-proxy ◄──
              MCP JSON-RPC                                       (one process)
 ```
 
-**Runtime protection.** The proxy is a static Go binary with no allocations on the message path. If the daemon leaks memory, crashes, or hangs, Claude Code is unaffected — the proxy reconnects automatically and the session continues.
+**Runtime protection.** The proxy is a single Go binary that isolates Claude Code from the MCP server process. If the daemon leaks memory, crashes, or becomes unreachable, Claude Code's process tree is unaffected — the proxy detects the broken connection and reconnects automatically. In-flight requests may fail, but subsequent requests proceed normally once the daemon recovers.
 
 **Shared state.** Three terminal tabs share one daemon process instead of three copies of your models, connections, and state. One embedding model in memory, one connection pool, one audio device.
 
@@ -232,7 +232,7 @@ A proxy makes sense when your MCP server has **expensive startup**, **heavy shar
 | Singleton resources (audio device, display) | File lock contention between sessions | Single owner, proxy multiplexes access |
 | Server-initiated notifications | Not possible with stdio (client must poll) | Daemon pushes via WebSocket, proxy writes to stdout |
 | Memory leaks in MCP server | Leaks inside Claude Code's process tree | Leaks isolated to daemon process |
-| MCP server crash | Claude Code session dies | Proxy reconnects, session continues |
+| MCP server crash | Claude Code session dies | Proxy reconnects on disconnect; in-flight requests fail but session recovers |
 | Hook scripts need daemon access | Python imports blow 100ms hook budget | ~15ms Go binary relay via `--hook` |
 
 If your MCP server is stateless, starts in <100ms, and you don't use hooks that need daemon access, you don't need a proxy — direct stdio is simpler.

@@ -109,6 +109,22 @@ bd close <id>                         # done
 bd sync                               # push to remote
 ```
 
+### Code Review
+
+Copilot auto-reviews every push via branch ruleset (`review_on_push: true`). No manual review request needed.
+
+1. **Create PR** via `gh pr create`. Include summary and test plan.
+2. **Background watch** — immediately run `sleep 5 && gh pr checks <number> --watch --fail-fast` in background. Do not block the main shell. Copilot and Bugbot may take 1–3 minutes after CI completes.
+3. **Read all feedback** when background watch completes:
+   - `gh pr reviews <number>` — check review verdicts
+   - `gh api repos/punt-labs/mcp-proxy/pulls/<number>/comments` — read inline comments
+   - `gh pr checks <number>` — verify all checks green
+4. **Take every comment seriously.** If a reviewer flags it, fix it. No "pre-existing" or "out of scope" excuses.
+5. **Fix, re-push, repeat.** Each push triggers a new Copilot review cycle. Expect **2–6 review cycles** before merging. Run `make check` before each push.
+6. **Merge only when the last cycle is uneventful** — zero new comments, all checks green. Use `gh pr merge <number> --squash --delete-branch`.
+
+The entire PR cycle (create → review → fix → merge) should be autonomous. Do not require user intervention to land a clean PR.
+
 ### Session Close Protocol
 
 ```bash
