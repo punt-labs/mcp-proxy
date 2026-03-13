@@ -66,7 +66,7 @@ Run before every commit:
 make check
 ```
 
-The Makefile is the source of truth for what `check` means (`make help` to see all targets). Expands to `make lint test` which runs `go vet`, `staticcheck`, and `go test -race`.
+The Makefile is the source of truth for what `check` means (`make help` to see all targets). Expands to `make lint docs test` which runs `go vet`, `staticcheck`, `markdownlint`, and `go test -race`.
 
 ## Testing
 

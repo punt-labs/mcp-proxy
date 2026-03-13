@@ -166,7 +166,7 @@ make dist         # Builds dist/mcp-proxy-{darwin,linux}-{arm64,amd64}
 ## Development
 
 ```bash
-make check        # Run all quality gates (lint + test)
+make check        # Run all quality gates (lint + docs + test)
 make lint         # go vet + staticcheck
 make test         # go test -race -count=1 ./...
 make format       # gofmt -w .

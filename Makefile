@@ -8,7 +8,7 @@ lint: ## Lint (go vet + staticcheck)
 	staticcheck ./...
 
 docs: ## Lint markdown
-	npx markdownlint-cli2 "**/*.md" "#node_modules"
+	npx --yes markdownlint-cli2 "**/*.md" "#node_modules"
 
 test: ## Run tests with race detection
 	go test -race -count=1 ./...
