@@ -19,7 +19,7 @@ Claude Code ◄──────────────► mcp-proxy ◄──
 
 **Shared state.** Three terminal tabs share one daemon process instead of three copies of your models, connections, and state. One embedding model in memory, one connection pool, one audio device.
 
-**Hook speed.** Claude Code hook scripts have a ~100ms budget. Python CLI imports (loading nats, pydantic, lancedb) take 300ms-3.7s. The proxy's `--hook` mode relays JSON-RPC to the daemon in ~15ms — the hook runs its logic on the daemon side where everything is already loaded.
+**Hook speed.** Claude Code hook scripts have a ~100ms budget. Heavy CLI imports easily blow this. The proxy's `--hook` mode relays JSON-RPC to the daemon in ~15ms — the hook runs its logic on the daemon side where everything is already loaded.
 
 The proxy works with **any MCP server** that exposes a WebSocket endpoint speaking MCP JSON-RPC — it never inspects message content. Your server doesn't need to be modified; it just needs a WebSocket transport in addition to (or instead of) stdio.
 
@@ -115,7 +115,7 @@ Dials the daemon, closes immediately, exits 0 on success or 1 on failure. Prints
 
 ### Hook Relay
 
-Claude Code hook scripts need to reach the daemon fast (<100ms budget). Python CLI imports blow this budget. The proxy's `--hook` mode sends one-shot JSON-RPC messages over WebSocket in ~15ms:
+Claude Code hook scripts need to reach the daemon fast (<100ms budget). Heavy CLI imports blow this budget. The proxy's `--hook` mode sends one-shot JSON-RPC messages over WebSocket in ~15ms:
 
 ```bash
 # Sync hook: send request, wait for response, print result to stdout
@@ -246,7 +246,7 @@ A proxy makes sense when your MCP server has **expensive startup**, **heavy shar
 | Memory leaks in MCP server | Leaks inside Claude Code's process tree | Leaks isolated to daemon process |
 | MCP server crash | Claude Code session dies | Proxy reconnects on disconnect; in-flight requests fail but session recovers |
 | MCP server hangs | Claude Code session freezes | Keepalive detects within 7s, proxy reconnects |
-| Hook scripts need daemon access | Python imports blow 100ms hook budget | ~15ms Go binary relay via `--hook` |
+| Hook scripts need daemon access | Heavy CLI imports blow 100ms hook budget | ~15ms Go binary relay via `--hook` |
 
 If your MCP server is stateless, starts in <100ms, and you don't use hooks that need daemon access, you don't need a proxy — direct stdio is simpler.
 
