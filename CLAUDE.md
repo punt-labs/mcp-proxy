@@ -8,9 +8,9 @@ There is no such thing as a "pre-existing" issue. If you see a problem — in co
 
 ## Project State
 
-**Core implemented.** Bidirectional stdio-to-WebSocket bridge with session identity, debug logging, signal handling, automatic reconnect with backoff, and health check. Integration tests blocked on quarry/biff WebSocket endpoints.
+**Core implemented.** Bidirectional stdio-to-WebSocket bridge with session identity, debug logging, signal handling, automatic reconnect with backoff, health check, and hook relay mode. Integration tests blocked on quarry/biff WebSocket endpoints.
 
-The binary is `mcp-proxy`. Invocation: `mcp-proxy <daemon-url>`. Health check: `mcp-proxy --health <daemon-url>`.
+The binary is `mcp-proxy`. Invocation: `mcp-proxy <daemon-url>`. Health check: `mcp-proxy --health <daemon-url>`. Hook relay: `mcp-proxy <daemon-url> --hook <event>`.
 
 Check `bd ready` for current unblocked work.
 
@@ -39,8 +39,9 @@ The proxy is transparent — it doesn't know what MCP tools exist. JSON-RPC mess
 
 | Package | What It Does |
 |---------|-------------|
-| `main` | Entry point: parse args, health check, reconnecting proxy, signal handling |
+| `main` | Entry point: parse args, health check, hook relay, reconnecting proxy, signal handling |
 | `internal/bridge` | Bidirectional stdin↔WebSocket forwarding (two goroutines + WaitGroup) |
+| `internal/hook` | One-shot JSON-RPC relay for hook scripts (sync request/response, async notification) |
 | `internal/reconnect` | Reconnecting bridge: stdin channel, per-connection goroutines, backoff |
 | `internal/transport` | WebSocket dial with typed errors, session key injection, bearer token auth |
 | `internal/session` | Process-tree walking to resolve Claude session key |

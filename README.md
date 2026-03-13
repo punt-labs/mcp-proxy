@@ -95,6 +95,30 @@ mcp-proxy --health ws://localhost:8420/mcp
 
 Dials the daemon, closes immediately, exits 0 on success or 1 on failure. Prints `mcp-proxy: ok` or `mcp-proxy: health check failed: <error>` to stderr. Useful for `quarry doctor`, launchd `KeepAlive`, and CI.
 
+### Hook Relay
+
+Claude Code hook scripts need to reach the daemon fast (<100ms budget). Python CLI imports blow this budget. The proxy's `--hook` mode sends one-shot JSON-RPC messages over WebSocket in ~15ms:
+
+```bash
+# Sync hook: send request, wait for response, print result to stdout
+mcp-proxy ws://localhost:8080 --hook PreToolUse < payload.json
+
+# Async hook: send notification, exit immediately
+mcp-proxy ws://localhost:8080 --hook --async SessionEnd < payload.json
+```
+
+The proxy reads stdin, wraps it as `params` in a JSON-RPC envelope with method `hook/<event>`, and sends it to the daemon's `/hook` endpoint. Sync hooks wait for a response; async hooks perform a graceful WebSocket close to guarantee delivery.
+
+**Usage in hook scripts:**
+
+```bash
+#!/usr/bin/env bash
+[[ -f "$HOME/.punt-hooks-kill" ]] && exit 0
+mcp-proxy ws://localhost:8080 --hook SessionStart
+```
+
+Hook mode does not reconnect — if the daemon is unreachable, it exits immediately with code 1.
+
 ### MCP Server Configuration
 
 Replace the direct MCP server command with the proxy:
@@ -124,8 +148,8 @@ Logs include message sizes, connection events, and error details. Stdout is neve
 
 | Code | Meaning |
 |------|---------|
-| 0 | Clean shutdown (stdin EOF), or health check success |
-| 1 | Runtime error, or health check failure |
+| 0 | Clean shutdown (stdin EOF), health check success, or hook success |
+| 1 | Runtime error, health check failure, or daemon error response |
 | 2 | Usage error (wrong arguments) |
 
 ### Signal Handling

@@ -13,13 +13,26 @@ This file is the authoritative record of design decisions, prior approaches, and
 ## System Architecture
 
 ```text
+MCP bridge (long-running, bidirectional, reconnecting):
+
                     stdio                      WebSocket
 Claude Code ◄──────────────► mcp-proxy ◄──────────────────────► daemon
              MCP JSON-RPC    (static Go       ws://host/mcp     (one process)
              (NDJSON)         binary)
+
+Hook relay (one-shot, per-event):
+
+                    stdin/stdout                WebSocket
+Hook script ──────────────────► mcp-proxy ──────────────────────► daemon
+             JSON payload       (same Go        ws://host/hook    (same process)
+                                 binary)
+
+Health check (one-shot, no payload):
+
+mcp-proxy --health ws://host/mcp ──► dial + close ──► exit 0/1
 ```
 
-The proxy is transparent — it doesn't parse, validate, or transform JSON-RPC messages. Messages are opaque byte sequences forwarded without modification.
+**MCP bridge** is transparent — messages are opaque byte sequences forwarded without modification. **Hook relay** constructs a JSON-RPC envelope around the hook payload and inspects the response for success/error (a deliberate exception to opaque forwarding). **Health check** sends no payload.
 
 ### Package Map
 
@@ -399,12 +412,260 @@ A `mcp-proxy-health` binary would duplicate URL parsing, auth setup, and transpo
 
 ---
 
+## DES-011: Hook Relay Mode
+
+**Date:** 2026-03-12
+**Status:** SETTLED
+**Topic:** One-shot CLI mode for Claude Code hook scripts to reach the daemon
+
+### Problem
+
+Claude Code hooks are shell scripts with brutal latency budgets:
+
+| Hook Event | Budget | Nature |
+|-----------|--------|--------|
+| `PreToolUse` | < 100ms | Sync (blocking) |
+| `UserPromptSubmit` | < 100ms | Sync (blocking) |
+| `PostToolUse` | < 200ms | Async (observational) |
+| `Stop` | < 200ms | Sync (blocking) |
+| `SessionStart` | < 500ms | Sync (blocking) |
+| `Notification` | unlimited | Async |
+| `SessionEnd` | unlimited | Async |
+
+Python import tax makes these budgets impossible to meet through normal CLI invocation:
+
+| Entry point | Import time |
+|-------------|------------|
+| `biff` (full CLI) | ~3.7s |
+| `biff-hook` (stdlib-only) | ~0.3s |
+| `quarry` (full CLI) | ~1.5s |
+| `mcp-proxy` (Go binary) | < 10ms |
+
+Each Python project independently solves this with lightweight entry points, parallel import trees, and stdlib-only handlers — duplicated effort that's still too slow for the 100ms budget.
+
+### Design
+
+A new `--hook` mode on `mcp-proxy` makes one-shot WebSocket calls to the daemon on a dedicated `/hook` endpoint, using the same auth and transport as the MCP bridge mode.
+
+```bash
+# Sync hook (round-trip): sends JSON-RPC request, waits for response, prints to stdout
+mcp-proxy <url> --hook <event> < payload.json
+
+# Async hook (fire-and-forget): sends JSON-RPC notification, exits immediately
+mcp-proxy <url> --hook --async <event> < payload.json
+```
+
+The `<url>` is the base daemon URL (e.g., `ws://localhost:8080`). The proxy appends `/hook` for hook relay mode. For MCP bridge mode, the user passes the full URL including path (e.g., `ws://localhost:8080/mcp`) — the proxy dials it verbatim. This keeps hook invocations simple (same base URL, proxy appends the endpoint) while bridge mode remains explicit about the daemon's MCP path.
+
+**Wire protocol — JSON-RPC over WebSocket at `/hook`:**
+
+Sync hooks send a JSON-RPC **request** (has `id`). The proxy reads messages until it receives one whose `id` matches, discarding any others.
+
+```jsonc
+// → daemon
+{"jsonrpc": "2.0", "method": "hook/SessionStart", "id": 1, "params": { /* stdin payload */ }}
+// ← daemon
+{"jsonrpc": "2.0", "id": 1, "result": {"additionalContext": "..."}}
+```
+
+Async hooks send a JSON-RPC **notification** (no `id`). The proxy performs a graceful WebSocket close and exits.
+
+```jsonc
+// → daemon (no id = notification, no response expected)
+{"jsonrpc": "2.0", "method": "hook/SessionEnd", "params": { /* stdin payload */ }}
+```
+
+**Usage in hook scripts:**
+
+```bash
+#!/usr/bin/env bash
+[[ -f "$HOME/.punt-hooks-kill" ]] && exit 0
+# Fast gate: skip if not enabled for this project
+[[ -f "$REPO_ROOT/.biff" ]] || exit 0
+
+# Stdin from Claude Code passes through to daemon
+mcp-proxy ws://localhost:8080 --hook SessionStart
+```
+
+### Why Separate `/hook` Endpoint
+
+The `/mcp` endpoint speaks the MCP protocol, which requires an `initialize` → `initialized` handshake before processing messages. A hook connection that sends `hook/SessionStart` without this handshake would either be rejected or force every daemon to maintain a pre-initialization fast path.
+
+A dedicated `/hook` endpoint avoids this entirely:
+
+- No MCP initialization handshake required
+- No `mcp` WebSocket subprotocol negotiation
+- Daemon can reason independently about hook handler requirements vs MCP tool requirements
+- Clean separation of concerns in daemon route handlers
+
+Both endpoints share the same HTTP server, the same bearer token auth (`Authorization` header on upgrade), and the same session identity mechanism (`?session_key=<pid>`). One transport, one auth, two URL paths.
+
+### Why JSON-RPC Distinguishes Sync vs Async
+
+JSON-RPC 2.0 already defines the distinction:
+
+- **Request** (has `id`): server MUST reply. Caller blocks until response.
+- **Notification** (no `id`): server MUST NOT reply. Caller exits immediately.
+
+The `--async` flag on the CLI maps directly to "send a notification instead of a request." No new protocol concepts needed.
+
+### Method Naming
+
+Methods use `hook/<EventName>` where `<EventName>` matches Claude Code's PascalCase event names: `PreToolUse`, `PostToolUse`, `SessionStart`, `SessionEnd`, `Stop`, `UserPromptSubmit`, `Notification`, `PreCompact`. The proxy passes the event name from the CLI argument directly — no case conversion. Daemon code pattern-matches on these names.
+
+### Session Identity
+
+Hook relay inherits the same session identity mechanism as MCP bridge mode: process-tree walking to find the Claude Code PID, passed as `?session_key=<pid>` on the WebSocket upgrade. The daemon uses this to route hook responses to the correct session's state.
+
+### Stdin Payload Handling
+
+Claude Code passes hook context as JSON on stdin. The proxy reads available stdin data using deadline-based reads (see DES-012) — it does not wait for EOF, since Claude Code may not close the pipe promptly. The bytes are validated as JSON, wrapped as the `params` field of the JSON-RPC envelope, and sent as a complete message. This is a deliberate difference from bridge mode (which streams lines): hooks deliver a single complete payload, not a stream.
+
+The proxy validates that stdin is well-formed JSON before sending but does not inspect its structure — same opaque forwarding principle as DES-004. The one exception: the proxy constructs the JSON-RPC envelope (`jsonrpc`, `method`, `id`) around the raw payload bytes. This is minimal JSON construction, not full parsing.
+
+### Response Handling
+
+For sync hooks, the proxy must parse enough of the daemon's response to determine success vs error:
+
+- JSON-RPC `result` field → print response to stdout, exit 0
+- JSON-RPC `error` field → print error to stderr, exit 1
+
+This is a deliberate exception to DES-004's opaque forwarding. The proxy inspects two top-level fields (`id` for matching, `error` for exit code) but does not parse the contents of `result` or `error.data`.
+
+### Timeouts
+
+Two separate timeouts govern sync hook calls:
+
+| Timeout | What | Default |
+|---------|------|---------|
+| Dial timeout | WebSocket upgrade handshake | `transport.DialTimeout` (5s) |
+| Response timeout | Waiting for daemon reply after send | Configurable, default TBD |
+
+These are separate because a daemon that takes 4.8s to respond should not be killed by a 5s combined timeout that started at dial time. The response timeout starts after the message is sent.
+
+For hooks with tight budgets (100ms for `PreToolUse`), the caller's shell script can set its own timeout via the hook framework. The proxy's response timeout is a safety net against hangs, not a budget enforcer — the hook framework kills the process if the budget is exceeded.
+
+Async hook calls have no response timeout — they perform a graceful WebSocket close after sending.
+
+### Graceful Close for Async Hooks
+
+Async hooks must not use `CloseNow()` after sending. A TCP RST can race the notification frame and prevent delivery. The correct sequence:
+
+1. Send the JSON-RPC notification
+2. Send a WebSocket Close frame (`conn.Close(StatusNormalClosure, "")`)
+3. Wait for the daemon's Close echo (RFC 6455 §7.1.2)
+4. Exit
+
+This adds ~1ms on localhost — not a meaningful budget hit, and guarantees the notification is delivered.
+
+### Connection Failure — Fail Fast
+
+Hook mode does not reconnect. If the daemon is unreachable, the proxy exits immediately with code 1. Hooks have tight budgets — a single retry at 250ms already blows the PreToolUse budget. The hook script is responsible for treating a missing daemon as a non-fatal skip (the `|| exit 0` pattern).
+
+### Read Limit
+
+Hook connections set `conn.SetReadLimit(1024 * 1024)` (1MB), matching the MCP bridge mode. A daemon returning a large `additionalContext` payload (e.g., SessionStart injecting conversation context) could exceed the default 32KB limit.
+
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success (sync: response received; async: message sent) |
+| 1 | Error (connection failed, timeout, daemon error response) |
+| 2 | Usage error (missing arguments) |
+
+### What This Replaces
+
+Each daemon project currently maintains its own hook latency solution:
+
+| Project | Current approach | With hook relay |
+|---------|-----------------|----------------|
+| biff | `biff-hook` entry point, `_stdlib` modules, ~0.3s | `mcp-proxy --hook`, ~15ms |
+| quarry | Full CLI import, ~1.5s (hooks not yet implemented) | `mcp-proxy --hook`, ~15ms |
+| vox | Shell-only hooks, ~0.1s (limited capability) | `mcp-proxy --hook`, ~15ms (full daemon access) |
+| lux | Full CLI import (hooks not yet implemented) | `mcp-proxy --hook`, ~15ms |
+
+### What This Does NOT Replace
+
+- **Shell-level decisions** (file existence checks, env var gates, kill switches) stay in bash. The proxy is for reaching the daemon, not for replacing `[[ -f .biff ]]`.
+- **The MCP bridge mode** (`mcp-proxy <url>` without `--hook`) is unchanged — long-running, bidirectional, reconnecting.
+- **Daemon-side hook handlers.** Each daemon must implement `hook/*` JSON-RPC methods. The proxy just delivers the messages.
+
+### Rejected: Shared `/mcp` Endpoint
+
+Using the MCP endpoint for hooks would require either faking the MCP `initialize`/`initialized` handshake on every hook call or maintaining a pre-initialization fast path in every daemon. A separate `/hook` endpoint is cleaner — independent handler logic, no subprotocol negotiation, same auth.
+
+### Rejected: Separate HTTP Endpoint
+
+Adds a second transport (HTTP vs WebSocket) to the daemon. WebSocket is already proven, authed, and fast enough for one-shot calls (~5ms upgrade on localhost).
+
+### Rejected: Persistent Hook Connection
+
+A long-running hook relay (single WebSocket connection reused across hook invocations) would save the per-call upgrade handshake (~5ms). But it requires a background process or Unix socket to multiplex hook calls — significantly more complexity for a 5ms saving. One-shot calls are simple, stateless, and fast enough.
+
+### Rejected: Separate Binary (`cli-proxy`)
+
+Same distribution story problem as DES-010 (health check). One binary, one install, one version to track. The `--hook` flag is the natural extension of `--health`.
+
+### Files Affected
+
+| File | Change |
+|------|--------|
+| `main.go` | Add `--hook` arg parsing, `runHook()` function |
+| `internal/hook/hook.go` | One-shot send/receive logic (new package) |
+| `internal/transport/dial.go` | Accept endpoint path parameter (currently hardcodes `/mcp`) |
+
+The `internal/bridge` and `internal/reconnect` packages are unchanged — hook mode is a third execution mode alongside MCP bridge and health check.
+
+### Scalability
+
+At Claude Code hook firing rates — typically 1–10 events per minute per session, 5–20 sessions — hook relay produces 10–200 one-shot WebSocket connections per minute. This is trivial for any daemon that can handle a persistent MCP connection. One-shot connections are correct here.
+
+---
+
+## DES-012: Stdin Read — Deadline-Based, Not EOF-Based
+
+**Date:** 2026-03-12
+**Status:** SETTLED
+**Topic:** How hook relay reads stdin without hanging when Claude Code doesn't close the pipe
+
+### Problem
+
+`io.ReadAll(stdin)` blocks until EOF. Claude Code pipes hook payloads to stdin but doesn't always close the pipe promptly — especially for `SessionStart` resume/compact events. This is the exact bug documented in biff DES-027, where `sys.stdin.read()` caused session resume to hang indefinitely.
+
+### Design
+
+Deadline-based chunked reads using `(*os.File).SetReadDeadline` (available on Unix since Go 1.19):
+
+1. **100ms initial timeout** — wait for first data. If nothing arrives, return empty (null params).
+2. **50ms inter-chunk timeout** — after getting data, wait for more. If nothing, return what we have.
+3. **EOF** — return immediately (normal case when Claude Code closes the pipe).
+
+For readers without deadline support (e.g., `strings.Reader` in tests), falls back to `io.ReadAll` — these readers don't block.
+
+### Why These Timeouts
+
+Matches biff DES-027's proven values. In practice, Claude Code writes the payload in <1ms — the timeouts are safety nets for the pathological case. The worst-case overhead is 50ms (data arrives but no EOF), which is acceptable within hook budgets (100ms for PreToolUse).
+
+### Why Not a Goroutine
+
+A goroutine running `io.ReadAll` with a `select` timeout would work, but `io.ReadAll` is all-or-nothing — if data exists but no EOF arrives, the goroutine blocks forever (leaked goroutine). The process exits anyway so the leak is harmless, but deadline-based reads are deterministic: no goroutine leak, no channel, the Read call returns with `os.ErrDeadlineExceeded`.
+
+### Test Coverage
+
+| Test | Scenario |
+|------|----------|
+| `TestNoEOFStdinDoesNotHang` | Data on pipe, no EOF — completes in ~50ms |
+| `TestEmptyStdinNoEOF` | Open pipe, no data, no EOF — completes in ~100ms |
+
+---
+
 ## Open Questions
 
 1. ~~**Daemon auto-start.** Proxy starts daemon if missing, or always user's responsibility?~~ Settled: no auto-start (DES-005), but reconnect with backoff (DES-009) handles daemon restarts transparently.
 2. ~~**Graceful degradation.** Daemon down → fall back to in-process server, or fail fast?~~ Settled: reconnect with backoff (DES-009). No in-process fallback.
 3. **Lux daemon identity.** `lux serve` becomes the shared daemon, or MCP added to display server directly?
-4. **Hook CLI forwarding.** `vox play` and `lux hook post-bash` — forward to daemon, or work independently?
+4. ~~**Hook CLI forwarding.** `vox play` and `lux hook post-bash` — forward to daemon, or work independently?~~ Settled: forward to daemon via `--hook` relay mode (DES-011).
 5. ~~**WebSocket over Unix socket vs TCP.**~~ Settled by DES-001: WebSocket over TCP localhost. URLs are simpler (`ws://localhost:8420/mcp`), and TCP allows remote daemons (enabled by DES-007 bearer auth).
 
 ---

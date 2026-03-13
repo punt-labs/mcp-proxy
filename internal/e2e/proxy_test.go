@@ -4,6 +4,7 @@ package e2e_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -222,4 +223,87 @@ func TestProxy_E2E_MultipleMessages(t *testing.T) {
 
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
 	assert.Len(t, lines, 3)
+}
+
+func TestHook_E2E_SyncSuccess(t *testing.T) {
+	bin := binaryPath(t)
+	d := testutil.NewMockDaemon()
+	defer d.Close()
+
+	d.Handler = func(msg []byte) []byte {
+		return []byte(`{"jsonrpc":"2.0","id":1,"result":{"decision":"allow"}}`)
+	}
+
+	cmd := exec.Command(bin, d.BaseURL(), "--hook", "PreToolUse")
+	cmd.Stdin = strings.NewReader(`{"tool":"bash","input":"ls"}`)
+
+	stdout := &testutil.SafeBuffer{}
+	stderr := &testutil.SafeBuffer{}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	err := cmd.Run()
+	assert.NoError(t, err, "stderr: %s", stderr.String())
+	assert.JSONEq(t, `{"decision":"allow"}`, strings.TrimSpace(stdout.String()))
+}
+
+func TestHook_E2E_AsyncSuccess(t *testing.T) {
+	bin := binaryPath(t)
+	d := testutil.NewMockDaemon()
+	defer d.Close()
+
+	cmd := exec.Command(bin, d.BaseURL(), "--hook", "--async", "SessionEnd")
+	cmd.Stdin = strings.NewReader(`{"session":"test123"}`)
+
+	stderr := &testutil.SafeBuffer{}
+	cmd.Stderr = stderr
+
+	err := cmd.Run()
+	assert.NoError(t, err, "stderr: %s", stderr.String())
+
+	// Wait for daemon to process (no fixed sleep — poll for robustness).
+	require.Eventually(t, func() bool {
+		return len(d.Received()) > 0
+	}, 2*time.Second, 10*time.Millisecond, "daemon should have received the notification")
+
+	received := d.Received()
+
+	var envelope struct {
+		Method string          `json:"method"`
+		Params json.RawMessage `json:"params"`
+	}
+	require.NoError(t, json.Unmarshal(received[0], &envelope))
+	assert.Equal(t, "hook/SessionEnd", envelope.Method)
+}
+
+func TestHook_E2E_ConnectionRefused(t *testing.T) {
+	bin := binaryPath(t)
+
+	cmd := exec.Command(bin, "ws://127.0.0.1:1", "--hook", "PreToolUse")
+	cmd.Stdin = strings.NewReader(`{}`)
+
+	stderr := &testutil.SafeBuffer{}
+	cmd.Stderr = stderr
+
+	err := cmd.Run()
+	assert.Error(t, err)
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		assert.Equal(t, 1, exitErr.ExitCode())
+	}
+	assert.Contains(t, stderr.String(), "connection refused")
+}
+
+func TestHook_E2E_MissingEvent(t *testing.T) {
+	bin := binaryPath(t)
+
+	cmd := exec.Command(bin, "ws://localhost:8080", "--hook")
+	stderr := &testutil.SafeBuffer{}
+	cmd.Stderr = stderr
+
+	err := cmd.Run()
+	assert.Error(t, err)
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		assert.Equal(t, 2, exitErr.ExitCode())
+	}
+	assert.Contains(t, stderr.String(), "Usage")
 }

@@ -51,9 +51,21 @@ func (e *InvalidURLError) Unwrap() error {
 	return e.Err
 }
 
-// Dial connects to the daemon at rawURL, passing sessionKey as a query parameter.
-// Returns the WebSocket connection or a typed error.
+// Dial connects to the daemon at rawURL with the MCP subprotocol,
+// passing sessionKey as a query parameter. Returns the WebSocket connection
+// or a typed error.
 func Dial(ctx context.Context, rawURL string, sessionKey int, logger *slog.Logger) (*websocket.Conn, error) {
+	return dial(ctx, rawURL, sessionKey, []string{"mcp"}, logger)
+}
+
+// DialHook connects to the daemon at rawURL without any subprotocol,
+// passing sessionKey as a query parameter. Used for one-shot hook relay
+// connections on the /hook endpoint.
+func DialHook(ctx context.Context, rawURL string, sessionKey int, logger *slog.Logger) (*websocket.Conn, error) {
+	return dial(ctx, rawURL, sessionKey, nil, logger)
+}
+
+func dial(ctx context.Context, rawURL string, sessionKey int, subprotocols []string, logger *slog.Logger) (*websocket.Conn, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, &InvalidURLError{URL: rawURL, Err: err}
@@ -76,7 +88,7 @@ func Dial(ctx context.Context, rawURL string, sessionKey int, logger *slog.Logge
 	defer cancel()
 
 	opts := &websocket.DialOptions{
-		Subprotocols: []string{"mcp"},
+		Subprotocols: subprotocols,
 	}
 	if token := os.Getenv("MCP_PROXY_TOKEN"); token != "" {
 		opts.HTTPHeader = http.Header{

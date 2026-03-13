@@ -3,6 +3,7 @@ package testutil
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -43,13 +44,25 @@ func NewMockDaemon() *MockDaemon {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/mcp", d.handleWebSocket)
+	mux.HandleFunc("/hook", d.handleHook)
 	d.Server = httptest.NewServer(mux)
 	return d
 }
 
-// URL returns the WebSocket URL for connecting to this daemon.
+// URL returns the WebSocket URL for connecting to this daemon's MCP endpoint.
 func (d *MockDaemon) URL() string {
 	return "ws" + d.Server.URL[len("http"):] + "/mcp"
+}
+
+// BaseURL returns the base WebSocket URL without any path.
+// Used for hook relay tests where the proxy appends "/hook" itself.
+func (d *MockDaemon) BaseURL() string {
+	return "ws" + d.Server.URL[len("http"):]
+}
+
+// HookURL returns the WebSocket URL for connecting to this daemon's hook endpoint.
+func (d *MockDaemon) HookURL() string {
+	return "ws" + d.Server.URL[len("http"):] + "/hook"
 }
 
 // SessionKey returns the session_key received on the last connection upgrade.
@@ -233,4 +246,71 @@ readLoop:
 	d.disconnected = true
 	d.conn = nil
 	d.mu.Unlock()
+}
+
+// handleHook implements the /hook endpoint for one-shot hook relay connections.
+// It reads exactly one message, optionally responds (if the message is a JSON-RPC
+// request with an id), then closes cleanly.
+func (d *MockDaemon) handleHook(w http.ResponseWriter, r *http.Request) {
+	d.mu.Lock()
+	d.sessionKey = r.URL.Query().Get("session_key")
+	d.authHeader = r.Header.Get("Authorization")
+	d.acceptErr = nil
+	d.mu.Unlock()
+
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		InsecureSkipVerify: true,
+	})
+	if err != nil {
+		d.mu.Lock()
+		d.acceptErr = err
+		d.mu.Unlock()
+		return
+	}
+	conn.SetReadLimit(1024 * 1024)
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	d.mu.Lock()
+	d.connected = true
+	d.conn = conn
+	d.connCount++
+	d.mu.Unlock()
+
+	defer func() {
+		d.mu.Lock()
+		d.disconnected = true
+		d.conn = nil
+		d.mu.Unlock()
+	}()
+
+	// Read exactly one message.
+	_, msg, err := conn.Read(r.Context())
+	if err != nil {
+		return
+	}
+
+	d.mu.Lock()
+	d.received = append(d.received, msg)
+	handler := d.Handler
+	d.mu.Unlock()
+
+	// Check if it's a request (has "id") or notification (no "id").
+	var envelope struct {
+		ID json.RawMessage `json:"id"`
+	}
+	if err := json.Unmarshal(msg, &envelope); err != nil || len(envelope.ID) == 0 || string(envelope.ID) == "null" {
+		// Notification — no response needed. Clean close.
+		return
+	}
+
+	// Request — send response via handler or echo.
+	var resp []byte
+	if handler != nil {
+		resp = handler(msg)
+	} else {
+		resp = msg
+	}
+	if resp != nil {
+		_ = conn.Write(r.Context(), websocket.MessageText, resp)
+	}
 }
