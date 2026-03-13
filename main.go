@@ -211,7 +211,8 @@ func forceExitOnSecondSignal(ctx context.Context) {
 
 // envDuration reads a duration from an environment variable, falling back to
 // the provided default. Accepts Go duration strings (e.g., "5s", "500ms").
-// Logs a warning to stderr on parse errors or non-positive values.
+// Logs a warning to stderr on parse errors or negative values.
+// Zero is allowed (used to disable features like keepalive).
 func envDuration(key string, fallback time.Duration) time.Duration {
 	v := os.Getenv(key)
 	if v == "" {

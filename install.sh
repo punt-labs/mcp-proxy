@@ -85,18 +85,18 @@ ok "downloaded"
 
 info "Verifying checksum..."
 
-EXPECTED="$(grep "$ASSET" "$TMPDIR_DL/checksums.txt" | awk '{print $1}')"
-if [ -z "$EXPECTED" ]; then
-  fail "No checksum found for $ASSET in checksums.txt"
+MATCH_COUNT="$(grep -cF "  $ASSET" "$TMPDIR_DL/checksums.txt")"
+if [ "$MATCH_COUNT" -ne 1 ]; then
+  fail "Expected exactly 1 checksum for $ASSET, found $MATCH_COUNT"
 fi
+EXPECTED="$(grep -F "  $ASSET" "$TMPDIR_DL/checksums.txt" | awk '{print $1}')"
 
 if command -v sha256sum >/dev/null 2>&1; then
   ACTUAL="$(sha256sum "$TMPDIR_DL/$ASSET" | awk '{print $1}')"
 elif command -v shasum >/dev/null 2>&1; then
   ACTUAL="$(shasum -a 256 "$TMPDIR_DL/$ASSET" | awk '{print $1}')"
 else
-  warn "Neither sha256sum nor shasum found — skipping verification"
-  ACTUAL="$EXPECTED"
+  fail "Neither sha256sum nor shasum found — cannot verify download integrity"
 fi
 
 if [ "$ACTUAL" != "$EXPECTED" ]; then
