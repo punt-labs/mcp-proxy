@@ -23,11 +23,23 @@ import (
 type Conn interface {
 	Read(ctx context.Context) (websocket.MessageType, []byte, error)
 	Write(ctx context.Context, typ websocket.MessageType, p []byte) error
+	Ping(ctx context.Context) error
 	CloseNow() error
 }
 
 // DialFunc connects to the daemon. Called on each reconnect attempt.
 type DialFunc func(ctx context.Context) (Conn, error)
+
+// Config holds tunable parameters for the reconnecting bridge.
+type Config struct {
+	// PingInterval is how often to send WebSocket pings to the daemon.
+	// Zero disables pinging.
+	PingInterval time.Duration
+
+	// PongTimeout is how long to wait for a pong response before
+	// declaring the daemon unresponsive and forcing a reconnect.
+	PongTimeout time.Duration
+}
 
 // backoff schedule: 250ms, 500ms, 1s, 2s, 4s, 5s (cap).
 var backoffSteps = []time.Duration{
@@ -50,6 +62,11 @@ func nextBackoff(attempt int) time.Duration {
 // on daemon disconnect with exponential backoff. It returns nil on stdin EOF, or
 // an error if the context is cancelled.
 func Run(ctx context.Context, stdin io.Reader, stdout io.Writer, dial DialFunc, logger *slog.Logger) error {
+	return RunWithConfig(ctx, stdin, stdout, dial, Config{}, logger)
+}
+
+// RunWithConfig is like Run but accepts explicit configuration.
+func RunWithConfig(ctx context.Context, stdin io.Reader, stdout io.Writer, dial DialFunc, cfg Config, logger *slog.Logger) error {
 	lines := make(chan []byte, 64)
 
 	// Stdin goroutine: lives for the process lifetime.
@@ -109,7 +126,7 @@ func Run(ctx context.Context, stdin io.Reader, stdout io.Writer, dial DialFunc, 
 		fmt.Fprintln(os.Stderr, "mcp-proxy: connected")
 		logger.Debug("connected")
 
-		pending, err = runConnection(ctx, conn, lines, stdinDone, stdout, pending, logger)
+		pending, err = runConnection(ctx, conn, lines, stdinDone, stdout, pending, cfg, logger)
 		conn.CloseNow()
 
 		if err == nil {
@@ -139,12 +156,41 @@ func runConnection(
 	stdinDone <-chan error,
 	stdout io.Writer,
 	pending []byte,
+	cfg Config,
 	logger *slog.Logger,
 ) ([]byte, error) {
 	connCtx, connCancel := context.WithCancel(ctx)
 	defer connCancel()
 
 	readerDone := make(chan error, 1)
+
+	// Ping goroutine: periodic liveness check.
+	// Cancels connCtx if the daemon stops responding.
+	if cfg.PingInterval > 0 {
+		go func() {
+			ticker := time.NewTicker(cfg.PingInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-connCtx.Done():
+					return
+				case <-ticker.C:
+					pingCtx, pingCancel := context.WithTimeout(connCtx, cfg.PongTimeout)
+					err := conn.Ping(pingCtx)
+					pingCancel()
+					if err != nil {
+						if connCtx.Err() != nil {
+							return
+						}
+						logger.Debug("ping failed, forcing reconnect", "error", err)
+						connCancel()
+						return
+					}
+					logger.Debug("ping ok")
+				}
+			}
+		}()
+	}
 
 	// Reader goroutine: daemon → stdout.
 	// Only this goroutine writes to stdout — no mutex needed.

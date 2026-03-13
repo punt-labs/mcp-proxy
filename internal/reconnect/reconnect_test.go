@@ -5,16 +5,42 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/punt-labs/mcp-proxy/internal/debuglog"
 	"github.com/punt-labs/mcp-proxy/internal/reconnect"
 	"github.com/punt-labs/mcp-proxy/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/coder/websocket"
 )
+
+// hangableConn wraps a real Conn and can be told to stop responding to pings.
+type hangableConn struct {
+	reconnect.Conn
+	mu   sync.Mutex
+	hung bool
+}
+
+func (c *hangableConn) Hang() {
+	c.mu.Lock()
+	c.hung = true
+	c.mu.Unlock()
+}
+
+func (c *hangableConn) Ping(ctx context.Context) error {
+	c.mu.Lock()
+	hung := c.hung
+	c.mu.Unlock()
+	if hung {
+		// Block until context expires, simulating an unresponsive daemon.
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return c.Conn.Ping(ctx)
+}
 
 func dialMock(d *testutil.MockDaemon) reconnect.DialFunc {
 	return func(ctx context.Context) (reconnect.Conn, error) {
@@ -275,6 +301,66 @@ func TestMessagePreservation(t *testing.T) {
 
 	// The second message should eventually arrive.
 	require.True(t, waitForLines(stdout, 2, 3*time.Second), "message lost during reconnect")
+
+	stdinW.Close()
+	err := <-done
+	assert.NoError(t, err)
+}
+
+func TestPingTimeout_TriggersReconnect(t *testing.T) {
+	d := testutil.NewMockDaemon()
+	defer d.Close()
+
+	stdinR, stdinW := io.Pipe()
+	stdout := &testutil.SafeBuffer{}
+	logger := debuglog.NewTestLogger(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var currentConn *hangableConn
+	var connMu sync.Mutex
+
+	dial := func(dialCtx context.Context) (reconnect.Conn, error) {
+		conn, err := dialMock(d)(dialCtx)
+		if err != nil {
+			return nil, err
+		}
+		hc := &hangableConn{Conn: conn}
+		connMu.Lock()
+		currentConn = hc
+		connMu.Unlock()
+		return hc, nil
+	}
+
+	cfg := reconnect.Config{
+		PingInterval: 100 * time.Millisecond,
+		PongTimeout:  50 * time.Millisecond,
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- reconnect.RunWithConfig(ctx, stdinR, stdout, dial, cfg, logger.Logger)
+	}()
+
+	// Wait for first connection.
+	require.True(t, waitForConnCount(d, 1, 2*time.Second), "timed out waiting for connection")
+
+	// Send a message to verify the connection works.
+	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"ping","id":1}`)
+	require.True(t, waitForLines(stdout, 1, 2*time.Second))
+
+	// Make the daemon appear hung — pings will block until timeout.
+	connMu.Lock()
+	currentConn.Hang()
+	connMu.Unlock()
+
+	// Proxy should detect the hang and reconnect.
+	require.True(t, waitForConnCount(d, 2, 5*time.Second), "proxy should reconnect after ping timeout")
+
+	// New connection should work.
+	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"ping","id":2}`)
+	require.True(t, waitForLines(stdout, 2, 2*time.Second), "second message should arrive after reconnect")
 
 	stdinW.Close()
 	err := <-done

@@ -15,7 +15,7 @@ Claude Code ◄──────────────► mcp-proxy ◄──
              MCP JSON-RPC                                       (one process)
 ```
 
-**Runtime protection.** The proxy is a single Go binary that isolates Claude Code from the MCP server process. If the daemon leaks memory, crashes, or becomes unreachable, Claude Code's process tree is unaffected — the proxy detects the broken connection and reconnects automatically. In-flight requests may fail, but subsequent requests proceed normally once the daemon recovers.
+**Runtime protection.** The proxy is a single Go binary that isolates Claude Code from the MCP server process. If the daemon leaks memory, crashes, becomes unreachable, or hangs, Claude Code's process tree is unaffected — the proxy detects failures via WebSocket keepalive (5s ping, 2s pong timeout) and reconnects automatically. In-flight requests may fail, but subsequent requests proceed normally once the daemon recovers.
 
 **Shared state.** Three terminal tabs share one daemon process instead of three copies of your models, connections, and state. One embedding model in memory, one connection pool, one audio device.
 
@@ -84,13 +84,25 @@ The proxy reads JSON-RPC from stdin, forwards each line as a WebSocket text mess
 
 ### Reconnect
 
-If the daemon disconnects (restart, crash), the proxy reconnects automatically with exponential backoff (250ms → 5s cap). Messages queued during disconnect are preserved and delivered on the next connection. Status is printed to stderr:
+If the daemon disconnects (restart, crash) or stops responding, the proxy reconnects automatically with exponential backoff (250ms → 5s cap). Messages queued during disconnect are preserved and delivered on the next connection. Status is printed to stderr:
 
 ```text
 mcp-proxy: connected
 mcp-proxy: daemon disconnected, reconnecting...
 mcp-proxy: daemon unreachable, retrying in 250ms...
 mcp-proxy: connected
+```
+
+### Keepalive
+
+The proxy sends WebSocket pings every 5 seconds (default). If the daemon doesn't respond within 2 seconds, the proxy treats it as unresponsive and triggers a reconnect. This detects silent hangs — cases where the TCP connection stays open but the daemon has stopped processing.
+
+Configure via environment variables:
+
+```bash
+MCP_PROXY_PING_INTERVAL=5s  mcp-proxy ws://localhost:8420/mcp  # default
+MCP_PROXY_PONG_TIMEOUT=2s   mcp-proxy ws://localhost:8420/mcp  # default
+MCP_PROXY_PING_INTERVAL=0   mcp-proxy ws://localhost:8420/mcp  # disable keepalive
 ```
 
 ### Health Check
