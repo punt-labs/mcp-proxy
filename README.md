@@ -196,7 +196,7 @@ MCP over stdio uses newline-delimited JSON-RPC 2.0 (one JSON object per line). O
 ## Build
 
 ```bash
-go build -o mcp-proxy .
+CGO_ENABLED=0 go build -o mcp-proxy .
 ```
 
 Cross-compile for all platforms:

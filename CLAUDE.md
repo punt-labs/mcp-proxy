@@ -160,10 +160,10 @@ Updated **in the same PR that changes behavior**, not retroactively:
 Static binaries via GitHub Releases. Four platforms: darwin/arm64, darwin/amd64, linux/arm64, linux/amd64. Consumer projects download `mcp-proxy` as a shared dependency (like `uv`).
 
 ```bash
-GOOS=darwin  GOARCH=arm64 go build -o dist/mcp-proxy-darwin-arm64 .
-GOOS=darwin  GOARCH=amd64 go build -o dist/mcp-proxy-darwin-amd64 .
-GOOS=linux   GOARCH=arm64 go build -o dist/mcp-proxy-linux-arm64  .
-GOOS=linux   GOARCH=amd64 go build -o dist/mcp-proxy-linux-amd64  .
+CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build -o dist/mcp-proxy-darwin-arm64 .
+CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build -o dist/mcp-proxy-darwin-amd64 .
+CGO_ENABLED=0 GOOS=linux   GOARCH=arm64 go build -o dist/mcp-proxy-linux-arm64  .
+CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -o dist/mcp-proxy-linux-amd64  .
 ```
 
 ## Standards Authority
