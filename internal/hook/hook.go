@@ -17,7 +17,7 @@ import (
 	"os"
 	"time"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 // ResponseTimeout is the safety-net timeout for waiting for a daemon response
