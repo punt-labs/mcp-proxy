@@ -128,7 +128,17 @@ func runHook(rawURL string, event string, async bool) int {
 	sessionKey := session.FindSessionKey()
 	logger.Debug("hook mode", "event", event, "async", async, "session_key", sessionKey)
 
-	// Append /hook to the base URL.
+	// Validate and append /hook to the base URL.
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mcp-proxy: invalid URL: %v\n", err)
+		return 2
+	}
+	trimmedPath := strings.TrimRight(u.Path, "/")
+	if trimmedPath != "" && trimmedPath != "/hook" {
+		fmt.Fprintf(os.Stderr, "mcp-proxy: hook mode expects a base URL (e.g., ws://host:port), got path %q\n", u.Path)
+		return 2
+	}
 	hookURL, err := appendPath(rawURL, "hook")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mcp-proxy: invalid URL: %v\n", err)
@@ -148,8 +158,9 @@ func runHook(rawURL string, event string, async bool) int {
 
 	conn.SetReadLimit(1024 * 1024) // 1MB
 
-	// Response timeout: safety net against daemon hangs.
-	// The hook framework enforces the real budget by killing the process.
+	// Overall hook timeout: covers stdin read + send + response wait.
+	// The hook framework enforces the real budget by killing the process —
+	// this is a safety net against silent hangs.
 	ctx, cancel := context.WithTimeout(context.Background(), hook.ResponseTimeout)
 	defer cancel()
 

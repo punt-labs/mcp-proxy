@@ -94,11 +94,12 @@ func TestAsyncFireAndForget(t *testing.T) {
 	assert.Empty(t, stdout.String())
 	assert.Empty(t, stderr.String())
 
-	// Give the mock daemon a moment to process.
-	time.Sleep(50 * time.Millisecond)
+	// Wait for daemon to process (no fixed sleep — poll for robustness).
+	require.Eventually(t, func() bool {
+		return len(d.Received()) == 1
+	}, 2*time.Second, 10*time.Millisecond, "daemon should receive notification")
 
 	received := d.Received()
-	require.Len(t, received, 1)
 
 	var envelope struct {
 		Method string          `json:"method"`
@@ -278,10 +279,11 @@ func TestAsyncDeliveryGuarantee(t *testing.T) {
 	require.NoError(t, err)
 
 	// Despite the proxy closing immediately, the daemon should have the message.
-	time.Sleep(50 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		return len(d.Received()) == 1
+	}, 2*time.Second, 10*time.Millisecond, "async notification must be delivered despite immediate close")
 
 	received := d.Received()
-	require.Len(t, received, 1, "async notification must be delivered despite immediate close")
 
 	var envelope struct {
 		Params json.RawMessage `json:"params"`

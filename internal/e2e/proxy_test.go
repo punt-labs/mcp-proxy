@@ -261,11 +261,12 @@ func TestHook_E2E_AsyncSuccess(t *testing.T) {
 	err := cmd.Run()
 	assert.NoError(t, err, "stderr: %s", stderr.String())
 
-	// Give daemon a moment to process.
-	time.Sleep(50 * time.Millisecond)
+	// Wait for daemon to process (no fixed sleep — poll for robustness).
+	require.Eventually(t, func() bool {
+		return len(d.Received()) > 0
+	}, 2*time.Second, 10*time.Millisecond, "daemon should have received the notification")
 
 	received := d.Received()
-	require.NotEmpty(t, received, "daemon should have received the notification")
 
 	var envelope struct {
 		Method string          `json:"method"`

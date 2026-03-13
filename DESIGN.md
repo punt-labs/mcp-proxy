@@ -29,7 +29,7 @@ Hook script ──────────────────► mcp-proxy 
 
 Health check (one-shot, no payload):
 
-mcp-proxy --health ws://host ──► dial + close ──► exit 0/1
+mcp-proxy --health ws://host/mcp ──► dial + close ──► exit 0/1
 ```
 
 **MCP bridge** is transparent — messages are opaque byte sequences forwarded without modification. **Hook relay** constructs a JSON-RPC envelope around the hook payload and inspects the response for success/error (a deliberate exception to opaque forwarding). **Health check** sends no payload.
@@ -519,9 +519,9 @@ Hook relay inherits the same session identity mechanism as MCP bridge mode: proc
 
 ### Stdin Payload Handling
 
-Claude Code passes hook context as JSON on stdin. The proxy buffers all of stdin to EOF, then wraps the bytes as the `params` field of the JSON-RPC envelope and sends the complete message. This is a deliberate difference from bridge mode (which streams lines): hooks deliver a single complete payload, not a stream.
+Claude Code passes hook context as JSON on stdin. The proxy reads available stdin data using deadline-based reads (see DES-012) — it does not wait for EOF, since Claude Code may not close the pipe promptly. The bytes are validated as JSON, wrapped as the `params` field of the JSON-RPC envelope, and sent as a complete message. This is a deliberate difference from bridge mode (which streams lines): hooks deliver a single complete payload, not a stream.
 
-The proxy does not parse or validate the payload — same opaque forwarding principle as DES-004. The one exception: the proxy constructs the JSON-RPC envelope (`jsonrpc`, `method`, `id`) around the raw payload bytes. This is minimal JSON construction, not full parsing.
+The proxy validates that stdin is well-formed JSON before sending but does not inspect its structure — same opaque forwarding principle as DES-004. The one exception: the proxy constructs the JSON-RPC envelope (`jsonrpc`, `method`, `id`) around the raw payload bytes. This is minimal JSON construction, not full parsing.
 
 ### Response Handling
 

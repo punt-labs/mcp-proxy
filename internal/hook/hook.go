@@ -53,7 +53,8 @@ type response struct {
 	Error  json.RawMessage `json:"error"`
 }
 
-// Run executes a one-shot hook relay. It reads all of stdin, wraps the payload
+// Run executes a one-shot hook relay. It reads available stdin data using
+// deadline-based reads (may return before EOF — see DES-012), wraps the payload
 // in a JSON-RPC envelope with method "hook/<event>", and sends it to the daemon.
 //
 // For sync hooks (async=false): sends a request (with id), reads messages until
@@ -72,6 +73,9 @@ func Run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, conn *w
 	// Use trimmed payload as params. Empty stdin becomes JSON null.
 	var params json.RawMessage
 	if trimmed := bytes.TrimSpace(payload); len(trimmed) > 0 {
+		if !json.Valid(trimmed) {
+			return fmt.Errorf("stdin is not valid JSON")
+		}
 		params = json.RawMessage(trimmed)
 	}
 
@@ -140,26 +144,61 @@ func sendRequest(ctx context.Context, conn *websocket.Conn, method string, param
 			continue
 		}
 
-		// Match on id. We sent 1, expect "1" back (JSON numeric literal).
-		if string(resp.ID) != "1" {
+		// Handle error responses without an id (e.g., JSON-RPC parse errors).
+		if !hasID(resp.ID) && hasValue(resp.Error) {
+			fmt.Fprintf(stderr, "%s\n", resp.Error)
+			return ErrDaemonError
+		}
+
+		// Match on id. We sent 1 — accept any JSON representation (1, 1.0, "1").
+		if !matchesID(resp.ID, id) {
 			logger.Debug("ignoring message with non-matching id", "id", string(resp.ID))
 			continue
 		}
 
 		// Error response: print error to stderr, return sentinel for exit code 1.
-		if len(resp.Error) > 0 && string(resp.Error) != "null" {
+		if hasValue(resp.Error) {
 			fmt.Fprintf(stderr, "%s\n", resp.Error)
 			return ErrDaemonError
 		}
 
 		// Success response: print result to stdout.
-		if len(resp.Result) > 0 && string(resp.Result) != "null" {
+		if hasValue(resp.Result) {
 			fmt.Fprintf(stdout, "%s\n", resp.Result)
 		}
 
 		logger.Debug("received response", "size", len(resp.Result))
 		return nil
 	}
+}
+
+// hasID returns true if the JSON id field is present and non-null.
+func hasID(raw json.RawMessage) bool {
+	return hasValue(raw)
+}
+
+// hasValue returns true if raw JSON is present, non-empty, and not "null".
+func hasValue(raw json.RawMessage) bool {
+	return len(raw) > 0 && string(raw) != "null"
+}
+
+// matchesID checks whether a JSON-RPC response id matches the sent integer id.
+// JSON allows equivalent representations: 1, 1.0, "1" — we accept all of them.
+func matchesID(raw json.RawMessage, sentID int) bool {
+	if !hasID(raw) {
+		return false
+	}
+	// Try numeric first (covers 1 and 1.0).
+	var numID float64
+	if json.Unmarshal(raw, &numID) == nil {
+		return int(numID) == sentID
+	}
+	// Try string (covers "1").
+	var strID string
+	if json.Unmarshal(raw, &strID) == nil {
+		return strID == fmt.Sprintf("%d", sentID)
+	}
+	return false
 }
 
 // deadliner is implemented by types that support read deadlines (e.g., *os.File).
