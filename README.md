@@ -60,21 +60,21 @@ curl -fsSL https://raw.githubusercontent.com/punt-labs/mcp-proxy/65d3e15/install
 <summary>Manual install</summary>
 
 ```bash
-curl -fsSL https://github.com/punt-labs/mcp-proxy/releases/latest/download/mcp-proxy-darwin-arm64 -o mcp-proxy
-chmod +x mcp-proxy
-mv mcp-proxy ~/.local/bin/
+mkdir -p ~/.local/bin
+curl -fsSL https://github.com/punt-labs/mcp-proxy/releases/latest/download/mcp-proxy-darwin-arm64 -o ~/.local/bin/mcp-proxy
+chmod +x ~/.local/bin/mcp-proxy
 ```
 
 Replace `darwin-arm64` with your platform: `darwin-amd64`, `linux-arm64`, `linux-amd64`.
+Ensure `~/.local/bin` is on your `PATH`.
 
 </details>
 
 <details>
-<summary>Verify before running</summary>
+<summary>Inspect before running</summary>
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/punt-labs/mcp-proxy/65d3e15/install.sh -o install.sh
-shasum -a 256 install.sh
 cat install.sh
 sh install.sh
 ```
