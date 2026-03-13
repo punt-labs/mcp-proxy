@@ -113,7 +113,13 @@ func runProxy(rawURL string) int {
 		return conn, nil
 	}
 
-	err := reconnect.Run(ctx, os.Stdin, os.Stdout, dial, logger)
+	cfg := reconnect.Config{
+		PingInterval: envDuration("MCP_PROXY_PING_INTERVAL", 5*time.Second),
+		PongTimeout:  envDuration("MCP_PROXY_PONG_TIMEOUT", 2*time.Second),
+	}
+	logger.Debug("config", "ping_interval", cfg.PingInterval, "pong_timeout", cfg.PongTimeout)
+
+	err := reconnect.RunWithConfig(ctx, os.Stdin, os.Stdout, dial, cfg, logger)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mcp-proxy: %v\n", err)
 		return 1
@@ -139,10 +145,16 @@ func runHook(rawURL string, event string, async bool) int {
 		fmt.Fprintf(os.Stderr, "mcp-proxy: hook mode expects a base URL (e.g., ws://host:port), got path %q\n", u.Path)
 		return 2
 	}
-	hookURL, err := appendPath(rawURL, "hook")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "mcp-proxy: invalid URL: %v\n", err)
-		return 2
+	var hookURL string
+	if trimmedPath == "/hook" {
+		u.Path = "/hook"
+		hookURL = u.String()
+	} else {
+		hookURL, err = appendPath(rawURL, "hook")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "mcp-proxy: invalid URL: %v\n", err)
+			return 2
+		}
 	}
 
 	// Dial with standard timeout.
@@ -195,4 +207,24 @@ func forceExitOnSecondSignal(ctx context.Context) {
 	<-sig
 	fmt.Fprintf(os.Stderr, "mcp-proxy: forced exit\n")
 	os.Exit(1)
+}
+
+// envDuration reads a duration from an environment variable, falling back to
+// the provided default. Accepts Go duration strings (e.g., "5s", "500ms").
+// Logs a warning to stderr on parse errors or non-positive values.
+func envDuration(key string, fallback time.Duration) time.Duration {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mcp-proxy: invalid %s=%q, using default %s\n", key, v, fallback)
+		return fallback
+	}
+	if d < 0 {
+		fmt.Fprintf(os.Stderr, "mcp-proxy: negative %s=%s, using default %s\n", key, v, fallback)
+		return fallback
+	}
+	return d
 }

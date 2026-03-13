@@ -247,6 +247,29 @@ func TestHook_E2E_SyncSuccess(t *testing.T) {
 	assert.JSONEq(t, `{"decision":"allow"}`, strings.TrimSpace(stdout.String()))
 }
 
+func TestHook_E2E_SyncExplicitHookPath(t *testing.T) {
+	bin := binaryPath(t)
+	d := testutil.NewMockDaemon()
+	defer d.Close()
+
+	d.Handler = func(msg []byte) []byte {
+		return []byte(`{"jsonrpc":"2.0","id":1,"result":{"decision":"allow"}}`)
+	}
+
+	// Pass explicit /hook path — should NOT double to /hook/hook.
+	cmd := exec.Command(bin, d.HookURL(), "--hook", "PreToolUse")
+	cmd.Stdin = strings.NewReader(`{"tool":"bash","input":"ls"}`)
+
+	stdout := &testutil.SafeBuffer{}
+	stderr := &testutil.SafeBuffer{}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	err := cmd.Run()
+	assert.NoError(t, err, "stderr: %s", stderr.String())
+	assert.JSONEq(t, `{"decision":"allow"}`, strings.TrimSpace(stdout.String()))
+}
+
 func TestHook_E2E_AsyncSuccess(t *testing.T) {
 	bin := binaryPath(t)
 	d := testutil.NewMockDaemon()

@@ -1,11 +1,13 @@
 .PHONY: help lint docs test test-e2e check format build clean dist cover
 
+GOBIN := $(or $(shell go env GOBIN),$(shell go env GOPATH)/bin)
+
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
 
 lint: ## Lint (go vet + staticcheck)
 	go vet ./...
-	staticcheck ./...
+	$(GOBIN)/staticcheck ./...
 
 docs: ## Lint markdown
 	npx --yes markdownlint-cli2 "**/*.md" "#node_modules"
@@ -22,7 +24,7 @@ format: ## Format code
 	gofmt -w .
 
 build: ## Build binary
-	go build -o mcp-proxy .
+	CGO_ENABLED=0 go build -o mcp-proxy .
 
 clean: ## Remove build artifacts
 	rm -f mcp-proxy coverage.out
@@ -30,10 +32,10 @@ clean: ## Remove build artifacts
 
 dist: clean ## Cross-compile for all platforms
 	mkdir -p dist
-	GOOS=darwin  GOARCH=arm64 go build -o dist/mcp-proxy-darwin-arm64 .
-	GOOS=darwin  GOARCH=amd64 go build -o dist/mcp-proxy-darwin-amd64 .
-	GOOS=linux   GOARCH=arm64 go build -o dist/mcp-proxy-linux-arm64  .
-	GOOS=linux   GOARCH=amd64 go build -o dist/mcp-proxy-linux-amd64  .
+	CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build -o dist/mcp-proxy-darwin-arm64 .
+	CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build -o dist/mcp-proxy-darwin-amd64 .
+	CGO_ENABLED=0 GOOS=linux   GOARCH=arm64 go build -o dist/mcp-proxy-linux-arm64  .
+	CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -o dist/mcp-proxy-linux-amd64  .
 
 cover: ## Test with coverage report
 	go test -cover -coverprofile=coverage.out ./...

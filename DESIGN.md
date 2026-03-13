@@ -38,8 +38,9 @@ mcp-proxy --health ws://host/mcp ──► dial + close ──► exit 0/1
 
 | Package | What It Does |
 |---------|-------------|
-| `main` | Entry point: parse args, health check, reconnecting proxy, signal handling |
+| `main` | Entry point: parse args, health check, hook relay, reconnecting proxy, signal handling |
 | `internal/bridge` | Bidirectional stdin↔WebSocket forwarding (two goroutines + WaitGroup) |
+| `internal/hook` | One-shot JSON-RPC relay for hook scripts (sync request/response, async notification) |
 | `internal/reconnect` | Reconnecting bridge: stdin channel, per-connection goroutines, backoff |
 | `internal/transport` | WebSocket dial with typed errors, session key injection, bearer token auth |
 | `internal/session` | Process-tree walking to resolve Claude Code session key |
@@ -657,6 +658,121 @@ A goroutine running `io.ReadAll` with a `select` timeout would work, but `io.Rea
 |------|----------|
 | `TestNoEOFStdinDoesNotHang` | Data on pipe, no EOF — completes in ~50ms |
 | `TestEmptyStdinNoEOF` | Open pipe, no data, no EOF — completes in ~100ms |
+
+---
+
+## DES-013: WebSocket Keepalive — Ping/Pong Liveness Detection
+
+**Date:** 2026-03-12
+**Status:** SETTLED
+**Topic:** How the proxy detects a hung or unreachable daemon
+
+### Problem
+
+A daemon can become unresponsive without closing its TCP connection — process hang, full GC pause, deadlock, or network partition on remote daemons. Without active liveness probing, the proxy would forward messages into a black hole indefinitely. The proxy's stdin reader lives for the process lifetime and is decoupled from connection state (DES-009), so the write side must detect the problem.
+
+### Design
+
+VIP-style keepalive using RFC 6455 WebSocket ping/pong control frames:
+
+1. **Ping goroutine** starts per connection in `runConnection`. Fires every `PingInterval` (default 5s).
+2. Each ping is wrapped in `context.WithTimeout(connCtx, PongTimeout)` (default 2s). If the pong doesn't arrive in time, the ping goroutine cancels `connCtx`, which tears down the reader and writer.
+3. The reconnect loop (DES-009) sees the connection failure and redials with backoff.
+4. Guard: `if cfg.PingInterval > 0 && cfg.PongTimeout > 0` — zero disables the ping goroutine entirely.
+
+Worst-case detection time: **PingInterval + PongTimeout** = 7s with defaults.
+
+### Configuration
+
+| Parameter | Default | Env Var | Effect |
+|-----------|---------|---------|--------|
+| Ping interval | 5s | `MCP_PROXY_PING_INTERVAL` | How often the proxy pings |
+| Pong timeout | 2s | `MCP_PROXY_PONG_TIMEOUT` | How long to wait for pong |
+
+`envDuration()` parses `time.ParseDuration` format, warns to stderr on invalid values, and rejects negative durations.
+
+### Why WebSocket Pings, Not Application-Level
+
+WebSocket ping/pong is handled at the protocol layer by most libraries (Go, Python, Node — see `docs/daemon-guide.md` for compatibility table). It requires **zero daemon code changes** in most stacks. An application-level health check would require every daemon to implement a custom endpoint.
+
+### Why 5s/2s
+
+Modeled on VIP health check intervals. Fast enough to detect failures before a user notices (7s worst case), slow enough to be negligible overhead (~200 bytes/s per connection). The 2s pong timeout accommodates GC pauses in managed-language daemons without false positives.
+
+### Rejected: Read Timeout
+
+A 5-minute `SetReadDeadline` on the WebSocket connection was considered first. This is fundamentally wrong for MCP: the daemon may legitimately sit idle for hours between tool invocations. Read timeouts conflate "no messages" with "daemon is dead."
+
+### Rejected: Application-Level JSON-RPC Ping
+
+A `{"method":"ping"}` JSON-RPC message would work but requires every daemon to handle it. WebSocket pings are invisible to the application layer — the daemon's WebSocket library handles pong automatically.
+
+### Conn Interface Extension
+
+Added `Ping(context.Context) error` to the `reconnect.Conn` interface. This maps directly to `(*websocket.Conn).Ping` from `coder/websocket`, which sends a ping frame and blocks until the matching pong arrives (or context expires).
+
+### Test Coverage
+
+| Test | Scenario |
+|------|----------|
+| `TestPingTimeout_TriggersReconnect` | `hangableConn` blocks on Ping → proxy reconnects within PingInterval+PongTimeout |
+| `TestBasicRequestResponse` | Default config (no pings) — verifies zero-value guard doesn't interfere |
+
+---
+
+## DES-014: Static Build Enforcement — CGO_ENABLED=0
+
+**Date:** 2026-03-12
+**Status:** SETTLED
+**Topic:** Ensuring the binary is fully static with no C library dependencies
+
+### Problem
+
+Go's default build mode uses CGO for DNS resolution (`cgo` resolver) and other platform calls. This produces a dynamically-linked binary that depends on the host's libc version. On Linux, this means a binary built on Ubuntu 24.04 may not run on Amazon Linux 2 or Alpine. On macOS, the binary links against system frameworks, creating implicit version dependencies.
+
+### Design
+
+`CGO_ENABLED=0` on all build commands:
+
+- `Makefile` `build` target
+- `Makefile` `dist` target (all 4 platform combinations)
+- `.github/workflows/release.yml` build loop
+
+With `CGO_ENABLED=0`, Go uses its pure-Go DNS resolver and avoids all C library calls. The resulting binary is fully static on Linux (verified with `ldd`/`file`) and links only to system frameworks on macOS (unavoidable, but no user-space C libs).
+
+### Why Not a Build Tag
+
+`-tags netgo` forces the pure-Go DNS resolver but doesn't disable all CGO paths. `CGO_ENABLED=0` is the definitive switch — it cannot be overridden by import paths or build constraints.
+
+### Binary Size
+
+~6MB stripped (darwin/arm64). Acceptable for a proxy that runs as a persistent child process.
+
+---
+
+## DES-015: URL Canonicalization for Hook Endpoint
+
+**Date:** 2026-03-12
+**Status:** SETTLED
+**Topic:** How `--hook` mode constructs the daemon URL to avoid path doubling
+
+### Problem
+
+Users can invoke hook mode with either a base URL (`ws://host:8080`) or an explicit hook URL (`ws://host:8080/hook`). The original code unconditionally ran `appendPath(rawURL, "hook")`, which produced `ws://host:8080/hook/hook` when the user already included `/hook` in the URL. This was caught by Copilot's Bugbot review on PR #9.
+
+### Design
+
+Conditional path construction in `main.go`:
+
+1. Parse the URL, trim trailing slashes from the path.
+2. If the path is already `/hook`, canonicalize and use as-is (`u.Path = "/hook"; hookURL = u.String()`).
+3. Otherwise, `appendPath(rawURL, "hook")` appends `/hook` to the base path.
+
+The canonicalization via `u.String()` normalizes the URL (strips default ports, resolves `.` and `..` segments), preventing subtle mismatches.
+
+### Why Not Just Always Strip `/hook` and Re-add
+
+Stripping and re-adding works but is fragile if the daemon's hook endpoint ever changes path. The conditional approach is explicit about both code paths and doesn't silently mutate user-provided URLs beyond normalization.
 
 ---
 
