@@ -7,7 +7,7 @@
 
 Claude Code spawns a fresh MCP server process for every session. If your server loads an ML model, opens a database pool, or holds a NATS connection, each session duplicates all of it. A memory leak in the server leaks inside Claude Code's process tree. A hang in the server freezes the session. A crash takes it down entirely.
 
-mcp-proxy puts a process boundary between Claude Code and your MCP server. Instead of spawning the real server, Claude Code spawns a tiny Go binary (~5MB, <10ms startup) that forwards MCP messages over WebSocket to a single shared daemon:
+mcp-proxy puts a process boundary between Claude Code and your MCP server. Instead of spawning the real server, Claude Code spawns a tiny Go binary (~6MB, <10ms startup) that forwards MCP messages over WebSocket to a single shared daemon:
 
 ```text
                     stdio                      WebSocket
@@ -245,6 +245,7 @@ A proxy makes sense when your MCP server has **expensive startup**, **heavy shar
 | Server-initiated notifications | Not possible with stdio (client must poll) | Daemon pushes via WebSocket, proxy writes to stdout |
 | Memory leaks in MCP server | Leaks inside Claude Code's process tree | Leaks isolated to daemon process |
 | MCP server crash | Claude Code session dies | Proxy reconnects on disconnect; in-flight requests fail but session recovers |
+| MCP server hangs | Claude Code session freezes | Keepalive detects within 7s, proxy reconnects |
 | Hook scripts need daemon access | Python imports blow 100ms hook budget | ~15ms Go binary relay via `--hook` |
 
 If your MCP server is stateless, starts in <100ms, and you don't use hooks that need daemon access, you don't need a proxy — direct stdio is simpler.
