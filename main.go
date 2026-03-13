@@ -211,6 +211,7 @@ func forceExitOnSecondSignal(ctx context.Context) {
 
 // envDuration reads a duration from an environment variable, falling back to
 // the provided default. Accepts Go duration strings (e.g., "5s", "500ms").
+// Logs a warning to stderr on parse errors or non-positive values.
 func envDuration(key string, fallback time.Duration) time.Duration {
 	v := os.Getenv(key)
 	if v == "" {
@@ -218,6 +219,11 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 	}
 	d, err := time.ParseDuration(v)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "mcp-proxy: invalid %s=%q, using default %s\n", key, v, fallback)
+		return fallback
+	}
+	if d < 0 {
+		fmt.Fprintf(os.Stderr, "mcp-proxy: negative %s=%s, using default %s\n", key, v, fallback)
 		return fallback
 	}
 	return d

@@ -166,7 +166,7 @@ func runConnection(
 
 	// Ping goroutine: periodic liveness check.
 	// Cancels connCtx if the daemon stops responding.
-	if cfg.PingInterval > 0 {
+	if cfg.PingInterval > 0 && cfg.PongTimeout > 0 {
 		go func() {
 			ticker := time.NewTicker(cfg.PingInterval)
 			defer ticker.Stop()

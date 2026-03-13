@@ -343,8 +343,13 @@ func TestPingTimeout_TriggersReconnect(t *testing.T) {
 		done <- reconnect.RunWithConfig(ctx, stdinR, stdout, dial, cfg, logger.Logger)
 	}()
 
-	// Wait for first connection.
+	// Wait for first connection and ensure currentConn is assigned.
 	require.True(t, waitForConnCount(d, 1, 2*time.Second), "timed out waiting for connection")
+	require.Eventually(t, func() bool {
+		connMu.Lock()
+		defer connMu.Unlock()
+		return currentConn != nil
+	}, 2*time.Second, 10*time.Millisecond, "timed out waiting for currentConn assignment")
 
 	// Send a message to verify the connection works.
 	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"ping","id":1}`)
