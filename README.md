@@ -209,8 +209,8 @@ make help         # Show all targets
 | Layer | Tag | What |
 |-------|-----|------|
 | Unit | (none) | Bridge forwarding, session resolution, transport errors |
-| E2E | `e2e` | Compiled binary, black-box stdin/stdout piping |
 | Integration | `integration` | Real daemon roundtrips (quarry, biff) |
+| E2E | `e2e` | Compiled binary, black-box stdin/stdout piping |
 
 ### Formal Verification
 

@@ -48,6 +48,7 @@ The proxy is transparent — it doesn't know what MCP tools exist. JSON-RPC mess
 | `internal/debuglog` | Structured `slog` debug logging via `MCP_PROXY_DEBUG` env var |
 | `internal/testutil` | Mock daemon (`httptest.Server` + WebSocket), stdio pipe helpers |
 | `internal/e2e` | Black-box binary tests (build tag `e2e`) |
+| `internal/integration` | Real daemon roundtrip tests (build tag `integration`) |
 
 ## Go Standards
 
