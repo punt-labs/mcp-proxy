@@ -1,30 +1,40 @@
-.PHONY: vet test test-race test-e2e test-cover check build clean dist cover
+.PHONY: help lint docs test test-e2e check format build clean dist cover
 
-vet:
+help: ## Show available targets
+	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
+
+lint: ## Lint (go vet + staticcheck)
 	go vet ./...
+	staticcheck ./...
 
-test: vet
+docs: ## Lint markdown
+	npx markdownlint-cli2 "**/*.md" "#node_modules"
+
+test: ## Run tests with race detection
 	go test -race -count=1 ./...
 
-test-e2e: build
+test-e2e: build ## Run E2E tests (requires built binary)
 	go test -race -count=1 -tags=e2e ./internal/e2e/...
 
-cover:
-	go test -cover -coverprofile=coverage.out ./...
-	go tool cover -func=coverage.out
+check: lint docs test ## Run all quality gates
 
-check: vet test
+format: ## Format code
+	gofmt -w .
 
-build:
+build: ## Build binary
 	go build -o mcp-proxy .
 
-clean:
+clean: ## Remove build artifacts
 	rm -f mcp-proxy coverage.out
 	rm -rf dist/
 
-dist: clean
+dist: clean ## Cross-compile for all platforms
 	mkdir -p dist
 	GOOS=darwin  GOARCH=arm64 go build -o dist/mcp-proxy-darwin-arm64 .
 	GOOS=darwin  GOARCH=amd64 go build -o dist/mcp-proxy-darwin-amd64 .
 	GOOS=linux   GOARCH=arm64 go build -o dist/mcp-proxy-linux-arm64  .
 	GOOS=linux   GOARCH=amd64 go build -o dist/mcp-proxy-linux-amd64  .
+
+cover: ## Test with coverage report
+	go test -cover -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out

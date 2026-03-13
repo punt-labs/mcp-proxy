@@ -45,7 +45,7 @@ The proxy is transparent — it doesn't parse, validate, or transform JSON-RPC m
 
 ### Design
 
-Use **WebSocket** (`nhooyr.io/websocket`) for the proxy-to-daemon connection. The daemon adds a WebSocket upgrade endpoint at `/mcp` on its existing HTTP server.
+Use **WebSocket** (`github.com/coder/websocket`) for the proxy-to-daemon connection. The daemon adds a WebSocket upgrade endpoint at `/mcp` on its existing HTTP server.
 
 ### Why
 
@@ -65,7 +65,7 @@ Solves push. SageOx ships this in production and chose NDJSON for debuggability 
 
 ### Trade-off Accepted
 
-WebSocket requires a third-party Go library (`nhooyr.io/websocket` — not in stdlib). This is the only external dependency beyond testify. Acceptable given what it provides.
+WebSocket requires a third-party Go library (`github.com/coder/websocket` — not in stdlib). This is the only external dependency beyond testify. Acceptable given what it provides.
 
 ---
 
@@ -138,7 +138,7 @@ Either goroutine cancels the shared context on completion or error. `sync.Mutex`
 
 ### Race Safety
 
-`-race` is mandatory for all test runs. The proxy's two goroutines share `conn` (safe — nhooyr/websocket is concurrent-safe for one reader and one writer) and `stdout` (serialized by mutex).
+`-race` is mandatory for all test runs. The proxy's two goroutines share `conn` (safe — coder/websocket is concurrent-safe for one reader and one writer) and `stdout` (serialized by mutex).
 
 ---
 
