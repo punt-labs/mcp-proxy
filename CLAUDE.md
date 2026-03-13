@@ -51,7 +51,7 @@ The proxy is transparent — it doesn't know what MCP tools exist. JSON-RPC mess
 ## Go Standards
 
 - **Go 1.25+**. Module path: `github.com/punt-labs/mcp-proxy`.
-- **No external dependencies** unless there is a strong reason. The proxy must be a static binary with minimal attack surface. If WebSocket is chosen, `nhooyr.io/websocket` is acceptable — evaluate against DIY NDJSON over Unix socket first.
+- **No external dependencies** unless there is a strong reason. The proxy must be a static binary with minimal attack surface. If WebSocket is chosen, `github.com/coder/websocket` is acceptable — evaluate against DIY NDJSON over Unix socket first.
 - **Table-driven tests** with `testify/assert` and `testify/require`.
 - **No `interface{}` or `any` in public API** unless unavoidable.
 - **Errors are values, not strings.** Use typed errors for conditions callers need to distinguish. Wrap with `fmt.Errorf("context: %w", err)` for everything else.
@@ -63,20 +63,10 @@ The proxy is transparent — it doesn't know what MCP tools exist. JSON-RPC mess
 Run before every commit:
 
 ```bash
-go vet ./...
-go test -race -count=1 ./...
+make check
 ```
 
-Full gate (before PR):
-
-```bash
-go vet ./...
-go test -race -count=1 ./...
-go test -cover -coverprofile=coverage.out ./...
-go tool cover -func=coverage.out
-go build -o mcp-proxy .
-staticcheck ./...
-```
+The Makefile is the source of truth for what `check` means (`make help` to see all targets). Expands to `make lint docs test` which runs `go vet`, `staticcheck`, `markdownlint`, and `go test -race`.
 
 ## Testing
 

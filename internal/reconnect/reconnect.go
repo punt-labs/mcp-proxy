@@ -16,7 +16,7 @@ import (
 	"os"
 	"time"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 // Conn is the subset of *websocket.Conn used by the reconnect loop.

@@ -166,10 +166,12 @@ make dist         # Builds dist/mcp-proxy-{darwin,linux}-{arm64,amd64}
 ## Development
 
 ```bash
-make vet          # go vet
+make check        # Run all quality gates (lint + docs + test)
+make lint         # go vet + staticcheck
 make test         # go test -race -count=1 ./...
-make check        # vet + test + staticcheck
+make format       # gofmt -w .
 make cover        # Coverage report
+make help         # Show all targets
 ```
 
 ### Test Pyramid

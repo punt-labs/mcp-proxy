@@ -13,7 +13,7 @@ import (
 	"log/slog"
 	"sync"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 // Run bridges stdin/stdout to a WebSocket connection. It forwards lines from
@@ -28,7 +28,7 @@ func Run(ctx context.Context, stdin io.Reader, stdout io.Writer, conn *websocket
 	defer conn.CloseNow()
 
 	// MCP messages can be large (tool responses with embedded data).
-	// Default read limit in nhooyr.io/websocket is 32KB.
+	// Default read limit in github.com/coder/websocket is 32KB.
 	conn.SetReadLimit(1024 * 1024) // 1MB, matches scanner buffer
 
 	logger.Debug("bridge started")

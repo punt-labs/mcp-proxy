@@ -10,7 +10,7 @@ import (
 	"github.com/punt-labs/mcp-proxy/internal/transport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 func TestDial_Success(t *testing.T) {

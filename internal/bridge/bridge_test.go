@@ -14,7 +14,7 @@ import (
 	"github.com/punt-labs/mcp-proxy/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 // testLogger returns a debug logger that writes to the test log.
@@ -262,7 +262,7 @@ func TestBridge_DaemonDisconnect(t *testing.T) {
 	d.Close()
 
 	select {
-	case err = <-done:
+	case <-done:
 		// Bridge should exit (with or without error — the daemon went away).
 		// Not asserting error vs nil because the exact behavior depends on
 		// timing of httptest.Server.Close() vs conn.Read().

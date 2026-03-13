@@ -8,7 +8,7 @@ import (
 	"github.com/punt-labs/mcp-proxy/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 func TestMockDaemon_Echo(t *testing.T) {
