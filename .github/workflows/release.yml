@@ -17,17 +17,11 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Run tests
-        run: go test -race -count=1 ./...
+      - name: Run quality gates
+        run: make lint test
 
       - name: Build binaries
-        run: |
-          mkdir -p dist
-          for pair in darwin/arm64 darwin/amd64 linux/arm64 linux/amd64; do
-            os="${pair%/*}"
-            arch="${pair#*/}"
-            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -ldflags="-s -w" -o "dist/mcp-proxy-${os}-${arch}" .
-          done
+        run: make dist VERSION=${GITHUB_REF_NAME#v}
 
       - name: Generate checksums
         working-directory: dist
