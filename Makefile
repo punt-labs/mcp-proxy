@@ -1,7 +1,7 @@
 .PHONY: help lint docs test test-e2e check format build clean dist cover
 
 VERSION ?= dev
-LDFLAGS := -s -w -X 'main.version=$(VERSION)'
+LDFLAGS := -s -w -X main.version=$(VERSION)
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
