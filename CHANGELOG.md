@@ -8,6 +8,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `--version` flag prints the binary version (`dev` locally, release version in published binaries)
+- WebSocket keepalive with ping/pong liveness detection (5s/2s defaults, configurable via env vars)
+- `install.sh` following punt-labs convention (platform detection, SHA256 verification, marketplace registration)
+- `docs/daemon-guide.md` — how to build a daemon compatible with mcp-proxy
+
+### Changed
+
+- Makefile: `build` and `dist` targets inject version via `-ldflags` (`make build VERSION=X.Y.Z`)
+- Release workflow uses Makefile targets (`make lint test`, `make dist`) instead of inline commands
+- Static build enforcement: `CGO_ENABLED=0` on all build targets
+- README reframed around runtime protection with simplified install section
+
+## [0.1.0] — 2026-03-12
+
+### Added
+
 - Hook relay mode (`--hook`) for one-shot JSON-RPC calls from Claude Code hook scripts to the daemon
 - Async hook mode (`--hook --async`) for fire-and-forget notifications with graceful close
 - Dedicated `/hook` WebSocket endpoint (no MCP subprotocol, no initialize handshake)

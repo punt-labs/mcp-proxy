@@ -18,7 +18,10 @@ import (
 	"github.com/punt-labs/mcp-proxy/internal/transport"
 )
 
+var version = "dev"
+
 const usage = `Usage: mcp-proxy <daemon-url>
+       mcp-proxy --version
        mcp-proxy --health <daemon-url>
        mcp-proxy <daemon-url> --hook <event>
        mcp-proxy <daemon-url> --hook --async <event>
@@ -36,6 +39,12 @@ func main() {
 
 func run() int {
 	args := os.Args[1:]
+
+	// --version
+	if len(args) == 1 && args[0] == "--version" {
+		fmt.Printf("mcp-proxy %s\n", version)
+		return 0
+	}
 
 	// --health <url>
 	if len(args) >= 1 && args[0] == "--health" {

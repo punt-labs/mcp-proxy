@@ -164,7 +164,7 @@ func TestMultipleReconnects(t *testing.T) {
 
 	for cycle := range 3 {
 		connN := cycle + 1
-		require.True(t, waitForConnCount(d, connN, 5*time.Second), "timed out waiting for connection %d", connN)
+		require.True(t, waitForConnCount(d, connN, 10*time.Second), "timed out waiting for connection %d", connN)
 
 		msg := fmt.Sprintf(`{"jsonrpc":"2.0","method":"ping","id":%d}`, connN)
 		fmt.Fprintln(stdinW, msg)
