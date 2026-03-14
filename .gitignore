@@ -20,6 +20,7 @@ coverage.out
 # Local-only
 .claude/
 .vox/
+.envrc
 
 # Z tooling
 docs/fuzz.sty
