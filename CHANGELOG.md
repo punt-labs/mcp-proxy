@@ -16,7 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - Makefile: `build` and `dist` targets inject version via `-ldflags` (`make build VERSION=X.Y.Z`)
-- GitHub Actions workflows use Makefile targets instead of bare `go` commands
+- Release workflow uses Makefile targets (`make lint test`, `make dist`) instead of inline commands
 - Static build enforcement: `CGO_ENABLED=0` on all build targets
 - README reframed around runtime protection with simplified install section
 

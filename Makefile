@@ -1,7 +1,8 @@
 .PHONY: help lint docs test test-e2e check format build clean dist cover
 
 VERSION ?= dev
-LDFLAGS := -s -w -X main.version=$(VERSION)
+LDFLAGS      := -X main.version=$(VERSION)
+LDFLAGS_DIST := -s -w -X main.version=$(VERSION)
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -33,10 +34,10 @@ clean: ## Remove build artifacts
 
 dist: clean ## Cross-compile for all platforms
 	mkdir -p dist
-	CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o dist/mcp-proxy-darwin-arm64 .
-	CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o dist/mcp-proxy-darwin-amd64 .
-	CGO_ENABLED=0 GOOS=linux   GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o dist/mcp-proxy-linux-arm64  .
-	CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o dist/mcp-proxy-linux-amd64  .
+	CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build -ldflags="$(LDFLAGS_DIST)" -o dist/mcp-proxy-darwin-arm64 .
+	CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build -ldflags="$(LDFLAGS_DIST)" -o dist/mcp-proxy-darwin-amd64 .
+	CGO_ENABLED=0 GOOS=linux   GOARCH=arm64 go build -ldflags="$(LDFLAGS_DIST)" -o dist/mcp-proxy-linux-arm64  .
+	CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -ldflags="$(LDFLAGS_DIST)" -o dist/mcp-proxy-linux-amd64  .
 
 cover: ## Test with coverage report
 	go test -cover -coverprofile=coverage.out ./...
