@@ -33,3 +33,4 @@ docs/*.fuzz
 docs/*.toc
 docs/*.out
 docs/*.pdf
+.envrc.local
