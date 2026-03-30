@@ -23,7 +23,7 @@ var version = "dev"
 
 const usage = `Usage: mcp-proxy [--config <profile>] [<daemon-url>]
        mcp-proxy --version
-       mcp-proxy --health <daemon-url>
+       mcp-proxy --health [<daemon-url>]
        mcp-proxy <daemon-url> --hook <event>
        mcp-proxy <daemon-url> --hook --async <event>
 
@@ -31,7 +31,8 @@ Examples:
   mcp-proxy ws://localhost:8080/mcp              # MCP bridge (long-running)
   mcp-proxy --config quarry                      # Load URL and headers from ~/.punt-labs/mcp-proxy/quarry.toml
   mcp-proxy --config quarry ws://override/mcp    # Config headers, positional URL wins
-  mcp-proxy --health ws://localhost:8080/mcp     # Health check
+  mcp-proxy --health ws://localhost:8080/mcp     # Health check (explicit URL)
+  mcp-proxy --config quarry --health             # Health check using config URL
   mcp-proxy ws://localhost:8080 --hook PreToolUse        # Sync hook relay
   mcp-proxy ws://localhost:8080 --hook --async SessionEnd # Async hook relay
 `
@@ -75,13 +76,15 @@ func parseArgs(args []string) (parsedArgs, bool) {
 	}
 	args = rest
 
-	// --health <url>
+	// --health [<url>]  (URL is optional; falls back to config/default in run())
 	if len(args) >= 1 && args[0] == "--health" {
-		if len(args) != 2 {
+		if len(args) > 2 {
 			return p, false
 		}
 		p.healthCheck = true
-		p.daemonURL = args[1]
+		if len(args) == 2 {
+			p.daemonURL = args[1]
+		}
 		return p, true
 	}
 
@@ -142,18 +145,19 @@ func run() int {
 		extraHeaders = prof.Headers
 	}
 
-	if p.healthCheck {
-		return runHealthCheck(p.daemonURL, extraHeaders)
-	}
-
 	// Resolve effective daemon URL:
 	//   positional URL > config URL > default.
+	// Done before health-check so --config quarry --health uses config URL.
 	daemonURL := p.daemonURL
 	if daemonURL == "" {
 		daemonURL = configURL
 	}
 	if daemonURL == "" {
 		daemonURL = config.DefaultURL
+	}
+
+	if p.healthCheck {
+		return runHealthCheck(daemonURL, extraHeaders)
 	}
 
 	if p.hookEvent != "" {
