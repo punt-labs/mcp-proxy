@@ -27,12 +27,11 @@ func writeConfig(t *testing.T, profile, content string, mode os.FileMode) string
 }
 
 // setHome overrides os.UserHomeDir by setting HOME (Unix) for the duration of
-// the test.
+// the test. t.Setenv correctly restores or unsets HOME on cleanup even if it
+// was originally unset.
 func setHome(t *testing.T, home string) {
 	t.Helper()
-	orig := os.Getenv("HOME")
 	t.Setenv("HOME", home)
-	t.Cleanup(func() { os.Setenv("HOME", orig) })
 }
 
 func TestLoad_FileNotFound_Fallback(t *testing.T) {

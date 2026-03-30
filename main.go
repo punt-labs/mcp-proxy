@@ -59,7 +59,7 @@ func parseArgs(args []string) (parsedArgs, bool) {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--config":
-			if i+1 >= len(args) {
+			if i+1 >= len(args) || len(args[i+1]) == 0 || args[i+1][0] == '-' {
 				return p, false
 			}
 			p.profile = args[i+1]
@@ -73,6 +73,10 @@ func parseArgs(args []string) (parsedArgs, bool) {
 	args = rest
 
 	if p.showVersion {
+		// --version must be the only effective argument.
+		if p.profile != "" || len(args) > 0 {
+			return p, false
+		}
 		return p, true
 	}
 
@@ -250,9 +254,10 @@ func runHook(rawURL string, event string, async bool, extraHeaders map[string]st
 		fmt.Fprintf(os.Stderr, "mcp-proxy: invalid URL: %v\n", err)
 		return 2
 	}
+	// Replace path with /hook; preserve any existing query params (e.g.,
+	// auth tokens) but clear fragment, which is not meaningful for WebSocket.
 	u.Path = "/hook"
 	u.RawPath = ""
-	u.RawQuery = ""
 	u.Fragment = ""
 	hookURL := u.String()
 
