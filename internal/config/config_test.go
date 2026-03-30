@@ -19,7 +19,7 @@ func writeConfig(t *testing.T, profile, content string, mode os.FileMode) string
 	dir := filepath.Join(home, ".punt-labs", "mcp-proxy")
 	require.NoError(t, os.MkdirAll(dir, 0o700))
 	path := filepath.Join(dir, profile+".toml")
-	// Write with a safe default; umask cannot make it less permissive.
+	// Write with a safe default; umask cannot make it more permissive.
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 	// Explicitly chmod so the requested mode is set regardless of umask.
 	require.NoError(t, os.Chmod(path, mode))

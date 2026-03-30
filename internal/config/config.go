@@ -72,6 +72,10 @@ func Load(profile string) (Profile, error) {
 		return Profile{}, fmt.Errorf("stat %s: %w", path, err)
 	}
 
+	if !info.Mode().IsRegular() {
+		return Profile{}, fmt.Errorf("config path is not a regular file: %s", path)
+	}
+
 	if perm := info.Mode().Perm(); perm&^0o600 != 0 {
 		return Profile{}, &InsecurePermissionsError{Path: tilde(path), Mode: perm}
 	}
