@@ -99,6 +99,26 @@ url = "ws://remote.host:9999/mcp"
 	assert.Empty(t, p.Headers)
 }
 
+func TestLoad_RestrictivePermissions_OK(t *testing.T) {
+	// 0400 (owner read-only) is stricter than 0600 and must NOT be rejected.
+	home := writeConfig(t, "quarry", `[quarry]
+url = "ws://example.com/mcp"
+`, 0o400)
+	setHome(t, home)
+
+	p, err := config.Load("quarry")
+	require.NoError(t, err)
+	assert.Equal(t, "ws://example.com/mcp", p.URL)
+}
+
+func TestLoad_InvalidProfileName_Error(t *testing.T) {
+	setHome(t, t.TempDir())
+
+	_, err := config.Load("../evil")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid profile name")
+}
+
 func TestInsecurePermissionsError_IsTyped(t *testing.T) {
 	home := writeConfig(t, "q", `[q]
 url = "ws://x/mcp"

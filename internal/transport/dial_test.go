@@ -100,6 +100,45 @@ func TestDial_ConnectionRefused(t *testing.T) {
 	assert.True(t, isExpected, "expected a connection error, got: %v", err)
 }
 
+func TestDial_ExtraHeaders(t *testing.T) {
+	d := testutil.NewMockDaemon()
+	defer d.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	logger := debuglog.NewTestLogger(t).Logger
+	extra := map[string]string{
+		"X-Custom-Header": "my-value",
+	}
+	conn, err := transport.Dial(ctx, d.URL(), 1, extra, logger)
+	require.NoError(t, err)
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	assert.Equal(t, "my-value", d.Header("X-Custom-Header"))
+}
+
+func TestDial_ExtraHeaders_OverrideToken(t *testing.T) {
+	d := testutil.NewMockDaemon()
+	defer d.Close()
+
+	t.Setenv("MCP_PROXY_TOKEN", "env-token")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	logger := debuglog.NewTestLogger(t).Logger
+	extra := map[string]string{
+		"Authorization": "Bearer config-token",
+	}
+	conn, err := transport.Dial(ctx, d.URL(), 1, extra, logger)
+	require.NoError(t, err)
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	// Config header takes precedence over MCP_PROXY_TOKEN.
+	assert.Equal(t, "Bearer config-token", d.AuthHeader())
+}
+
 func TestDial_Timeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()

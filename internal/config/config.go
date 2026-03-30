@@ -7,9 +7,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"github.com/BurntSushi/toml"
 )
+
+// validProfile matches safe profile names: letters, digits, hyphens, underscores.
+// Dotted names and path separators are not allowed.
+var validProfile = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // DefaultURL is the fallback daemon URL when no config or URL is provided.
 const DefaultURL = "ws://localhost:8420/mcp"
@@ -40,6 +45,10 @@ func (e *InsecurePermissionsError) Error() string {
 // If the file exists but has permissions wider than 0600, an
 // InsecurePermissionsError is returned.
 func Load(profile string) (Profile, error) {
+	if !validProfile.MatchString(profile) {
+		return Profile{}, fmt.Errorf("invalid profile name %q: only letters, digits, hyphens, and underscores are allowed", profile)
+	}
+
 	path, err := profilePath(profile)
 	if err != nil {
 		return Profile{}, fmt.Errorf("resolving config path: %w", err)
@@ -54,7 +63,7 @@ func Load(profile string) (Profile, error) {
 		return Profile{}, fmt.Errorf("stat %s: %w", path, err)
 	}
 
-	if perm := info.Mode().Perm(); perm != 0o600 {
+	if perm := info.Mode().Perm(); perm&^0o600 != 0 {
 		return Profile{}, &InsecurePermissionsError{Path: tilde(path)}
 	}
 
