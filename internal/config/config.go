@@ -54,12 +54,20 @@ func Load(profile string) (Profile, error) {
 		return Profile{}, fmt.Errorf("resolving config path: %w", err)
 	}
 
-	info, err := os.Stat(path)
+	// Open once; stat on the fd to eliminate TOCTOU between permission check
+	// and read.
+	f, err := os.Open(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// File absent — silent fallback.
 			return Profile{}, nil
 		}
+		return Profile{}, fmt.Errorf("open %s: %w", path, err)
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
 		return Profile{}, fmt.Errorf("stat %s: %w", path, err)
 	}
 
@@ -68,7 +76,7 @@ func Load(profile string) (Profile, error) {
 	}
 
 	var raw map[string]toml.Primitive
-	meta, err := toml.DecodeFile(path, &raw)
+	meta, err := toml.NewDecoder(f).Decode(&raw)
 	if err != nil {
 		return Profile{}, fmt.Errorf("parsing %s: %w", path, err)
 	}

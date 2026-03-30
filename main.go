@@ -103,7 +103,10 @@ func parseArgs(args []string) (parsedArgs, bool) {
 	// Optional positional URL.
 	switch len(args) {
 	case 0:
-		// No URL — config or default.
+		// No URL is only valid when --config was supplied; otherwise usage error.
+		if p.profile == "" {
+			return p, false
+		}
 		return p, true
 	case 1:
 		p.daemonURL = args[0]
@@ -125,11 +128,7 @@ func run() int {
 		return 0
 	}
 
-	if p.healthCheck {
-		return runHealthCheck(p.daemonURL)
-	}
-
-	// Load config profile (if requested).
+	// Load config profile (if requested) — applies to all modes including health check.
 	var extraHeaders map[string]string
 	configURL := ""
 	if p.profile != "" {
@@ -141,6 +140,10 @@ func run() int {
 		}
 		configURL = prof.URL
 		extraHeaders = prof.Headers
+	}
+
+	if p.healthCheck {
+		return runHealthCheck(p.daemonURL, extraHeaders)
 	}
 
 	// Resolve effective daemon URL:
@@ -159,7 +162,7 @@ func run() int {
 	return runProxy(daemonURL, extraHeaders)
 }
 
-func runHealthCheck(rawURL string) int {
+func runHealthCheck(rawURL string, extraHeaders map[string]string) int {
 	logger := debuglog.Nop()
 
 	// Safety-net timeout slightly beyond Dial's internal DialTimeout,
@@ -167,7 +170,7 @@ func runHealthCheck(rawURL string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), transport.DialTimeout+time.Second)
 	defer cancel()
 
-	conn, err := transport.Dial(ctx, rawURL, 0, nil, logger)
+	conn, err := transport.Dial(ctx, rawURL, 0, extraHeaders, logger)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mcp-proxy: health check failed: %v\n", err)
 		return 1
