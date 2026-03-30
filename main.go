@@ -251,6 +251,9 @@ func runHook(rawURL string, event string, async bool, extraHeaders map[string]st
 		return 2
 	}
 	u.Path = "/hook"
+	u.RawPath = ""
+	u.RawQuery = ""
+	u.Fragment = ""
 	hookURL := u.String()
 
 	// Dial with standard timeout.

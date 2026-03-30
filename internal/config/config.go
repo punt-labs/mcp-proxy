@@ -35,7 +35,7 @@ type InsecurePermissionsError struct {
 }
 
 func (e *InsecurePermissionsError) Error() string {
-	return fmt.Sprintf("config file has insecure permissions (%04o, group/other bits must not be set): %s", e.Mode, e.Path)
+	return fmt.Sprintf("config file has insecure permissions (%04o, permissions must be 0600 or more restrictive): %s", e.Mode, e.Path)
 }
 
 // Load reads the profile from ~/.punt-labs/mcp-proxy/<profile>.toml.

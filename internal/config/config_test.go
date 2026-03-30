@@ -58,7 +58,7 @@ url = "ws://example.com/mcp"
 	require.ErrorAs(t, err, &permErr)
 	assert.Contains(t, permErr.Error(), "insecure permissions")
 	assert.Contains(t, permErr.Error(), "quarry.toml")
-	assert.Contains(t, permErr.Error(), "group/other bits must not be set")
+	assert.Contains(t, permErr.Error(), "permissions must be 0600 or more restrictive")
 }
 
 func TestLoad_MissingSection_Fallback(t *testing.T) {
