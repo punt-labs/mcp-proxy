@@ -21,7 +21,7 @@ func TestDial_Success(t *testing.T) {
 	defer cancel()
 
 	logger := debuglog.NewTestLogger(t).Logger
-	conn, err := transport.Dial(ctx, d.URL(), 12345, logger)
+	conn, err := transport.Dial(ctx, d.URL(), 12345, nil, logger)
 	require.NoError(t, err)
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
@@ -38,7 +38,7 @@ func TestDial_BearerToken(t *testing.T) {
 	defer cancel()
 
 	logger := debuglog.NewTestLogger(t).Logger
-	conn, err := transport.Dial(ctx, d.URL(), 12345, logger)
+	conn, err := transport.Dial(ctx, d.URL(), 12345, nil, logger)
 	require.NoError(t, err)
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
@@ -53,7 +53,7 @@ func TestDial_NoBearerTokenByDefault(t *testing.T) {
 	defer cancel()
 
 	logger := debuglog.NewTestLogger(t).Logger
-	conn, err := transport.Dial(ctx, d.URL(), 12345, logger)
+	conn, err := transport.Dial(ctx, d.URL(), 12345, nil, logger)
 	require.NoError(t, err)
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
@@ -76,7 +76,7 @@ func TestDial_InvalidURL(t *testing.T) {
 			defer cancel()
 
 			logger := debuglog.NewTestLogger(t).Logger
-			_, err := transport.Dial(ctx, tt.url, 1, logger)
+			_, err := transport.Dial(ctx, tt.url, 1, nil, logger)
 			var urlErr *transport.InvalidURLError
 			assert.ErrorAs(t, err, &urlErr)
 		})
@@ -89,7 +89,7 @@ func TestDial_ConnectionRefused(t *testing.T) {
 
 	logger := debuglog.NewTestLogger(t).Logger
 	// Port 1 is almost certainly not listening.
-	_, err := transport.Dial(ctx, "ws://127.0.0.1:1/mcp", 1, logger)
+	_, err := transport.Dial(ctx, "ws://127.0.0.1:1/mcp", 1, nil, logger)
 	require.Error(t, err)
 
 	// Should be either ConnectionRefused or a generic dial error.
@@ -106,6 +106,6 @@ func TestDial_Timeout(t *testing.T) {
 
 	logger := debuglog.NewTestLogger(t).Logger
 	// Non-routable address to trigger timeout.
-	_, err := transport.Dial(ctx, "ws://192.0.2.1:9999/mcp", 1, logger)
+	_, err := transport.Dial(ctx, "ws://192.0.2.1:9999/mcp", 1, nil, logger)
 	require.Error(t, err)
 }

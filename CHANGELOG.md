@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `--config <profile>` flag reads `~/.punt-labs/mcp-proxy/<profile>.toml`, extracting `[<profile>].url` and `[<profile>.headers]` for use as daemon URL and WebSocket upgrade headers
+- Config file permission enforcement: exits with error if file permissions are wider than 0600
+- `internal/config` package for profile loading with silent fallback to `ws://localhost:8420/mcp` when file or section is absent
+
 ## [0.2.0] - 2026-03-13
 
 ### Added

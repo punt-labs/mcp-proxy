@@ -54,18 +54,24 @@ func (e *InvalidURLError) Unwrap() error {
 // Dial connects to the daemon at rawURL with the MCP subprotocol,
 // passing sessionKey as a query parameter. Returns the WebSocket connection
 // or a typed error.
-func Dial(ctx context.Context, rawURL string, sessionKey int, logger *slog.Logger) (*websocket.Conn, error) {
-	return dial(ctx, rawURL, sessionKey, []string{"mcp"}, logger)
+//
+// extraHeaders are merged into the HTTP upgrade request headers. They extend
+// (and may override) any headers already set by environment variables such as
+// MCP_PROXY_TOKEN.
+func Dial(ctx context.Context, rawURL string, sessionKey int, extraHeaders map[string]string, logger *slog.Logger) (*websocket.Conn, error) {
+	return dial(ctx, rawURL, sessionKey, []string{"mcp"}, extraHeaders, logger)
 }
 
 // DialHook connects to the daemon at rawURL without any subprotocol,
 // passing sessionKey as a query parameter. Used for one-shot hook relay
 // connections on the /hook endpoint.
-func DialHook(ctx context.Context, rawURL string, sessionKey int, logger *slog.Logger) (*websocket.Conn, error) {
-	return dial(ctx, rawURL, sessionKey, nil, logger)
+//
+// extraHeaders are merged into the HTTP upgrade request headers.
+func DialHook(ctx context.Context, rawURL string, sessionKey int, extraHeaders map[string]string, logger *slog.Logger) (*websocket.Conn, error) {
+	return dial(ctx, rawURL, sessionKey, nil, extraHeaders, logger)
 }
 
-func dial(ctx context.Context, rawURL string, sessionKey int, subprotocols []string, logger *slog.Logger) (*websocket.Conn, error) {
+func dial(ctx context.Context, rawURL string, sessionKey int, subprotocols []string, extraHeaders map[string]string, logger *slog.Logger) (*websocket.Conn, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, &InvalidURLError{URL: rawURL, Err: err}
@@ -90,11 +96,22 @@ func dial(ctx context.Context, rawURL string, sessionKey int, subprotocols []str
 	opts := &websocket.DialOptions{
 		Subprotocols: subprotocols,
 	}
+	// Build request headers. MCP_PROXY_TOKEN sets Authorization; extraHeaders
+	// are layered on top and may override it.
 	if token := os.Getenv("MCP_PROXY_TOKEN"); token != "" {
 		opts.HTTPHeader = http.Header{
 			"Authorization": []string{"Bearer " + token},
 		}
 		logger.Debug("using bearer token from MCP_PROXY_TOKEN")
+	}
+	if len(extraHeaders) > 0 {
+		if opts.HTTPHeader == nil {
+			opts.HTTPHeader = make(http.Header)
+		}
+		for k, v := range extraHeaders {
+			opts.HTTPHeader.Set(k, v)
+		}
+		logger.Debug("merging extra headers from config", "count", len(extraHeaders))
 	}
 
 	conn, _, err := websocket.Dial(dialCtx, u.String(), opts)

@@ -112,6 +112,34 @@ MCP_PROXY_PONG_TIMEOUT=2s   mcp-proxy ws://localhost:8420/mcp  # default
 MCP_PROXY_PING_INTERVAL=0   mcp-proxy ws://localhost:8420/mcp  # disable keepalive
 ```
 
+### Config File
+
+Instead of passing a URL directly, you can store connection details in a profile file:
+
+```bash
+mcp-proxy --config quarry
+```
+
+Reads `~/.punt-labs/mcp-proxy/quarry.toml`:
+
+```toml
+[quarry]
+url = "ws://okinos.user.home.lab:8420/mcp"
+
+[quarry.headers]
+Authorization = "Bearer <token>"
+```
+
+The proxy enforces `0600` permissions on this file — it exits with an error if permissions are wider, since the file contains auth tokens.
+
+If the file doesn't exist or has no `[quarry]` section, the proxy falls back to `ws://localhost:8420/mcp`.
+
+You can still pass a URL alongside `--config`; the explicit URL takes precedence while headers from the config still apply:
+
+```bash
+mcp-proxy --config quarry ws://localhost:8420/mcp
+```
+
 ### Health Check
 
 ```bash

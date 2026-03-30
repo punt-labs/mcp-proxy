@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/punt-labs/mcp-proxy/internal/config"
 	"github.com/punt-labs/mcp-proxy/internal/debuglog"
 	"github.com/punt-labs/mcp-proxy/internal/hook"
 	"github.com/punt-labs/mcp-proxy/internal/reconnect"
@@ -20,7 +21,7 @@ import (
 
 var version = "dev"
 
-const usage = `Usage: mcp-proxy <daemon-url>
+const usage = `Usage: mcp-proxy [--config <profile>] [<daemon-url>]
        mcp-proxy --version
        mcp-proxy --health <daemon-url>
        mcp-proxy <daemon-url> --hook <event>
@@ -28,6 +29,8 @@ const usage = `Usage: mcp-proxy <daemon-url>
 
 Examples:
   mcp-proxy ws://localhost:8080/mcp              # MCP bridge (long-running)
+  mcp-proxy --config quarry                      # Load URL and headers from ~/.punt-labs/mcp-proxy/quarry.toml
+  mcp-proxy --config quarry ws://override/mcp    # Config headers, positional URL wins
   mcp-proxy --health ws://localhost:8080/mcp     # Health check
   mcp-proxy ws://localhost:8080 --hook PreToolUse        # Sync hook relay
   mcp-proxy ws://localhost:8080 --hook --async SessionEnd # Async hook relay
@@ -37,48 +40,123 @@ func main() {
 	os.Exit(run())
 }
 
-func run() int {
-	args := os.Args[1:]
+// parsedArgs holds the result of argument parsing.
+type parsedArgs struct {
+	profile     string // --config <profile>, empty if not given
+	daemonURL   string // positional URL, empty if not given
+	healthCheck bool
+	hookEvent   string
+	hookAsync   bool
+	showVersion bool
+}
 
-	// --version
+func parseArgs(args []string) (parsedArgs, bool) {
+	var p parsedArgs
+
+	// --version (must be the only arg)
 	if len(args) == 1 && args[0] == "--version" {
-		fmt.Printf("mcp-proxy %s\n", version)
-		return 0
+		p.showVersion = true
+		return p, true
 	}
+
+	// Consume named flags first, leaving positional args.
+	rest := args[:0:0]
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--config":
+			if i+1 >= len(args) {
+				return p, false
+			}
+			p.profile = args[i+1]
+			i++
+		default:
+			rest = append(rest, args[i])
+		}
+	}
+	args = rest
 
 	// --health <url>
 	if len(args) >= 1 && args[0] == "--health" {
 		if len(args) != 2 {
-			fmt.Fprint(os.Stderr, usage)
-			return 2
+			return p, false
 		}
-		return runHealthCheck(args[1])
+		p.healthCheck = true
+		p.daemonURL = args[1]
+		return p, true
 	}
 
 	// <url> --hook [--async] <event>
 	if len(args) >= 3 && args[1] == "--hook" {
-		return parseHook(args[0], args[2:])
+		p.daemonURL = args[0]
+		hookArgs := args[2:]
+		if len(hookArgs) >= 1 && hookArgs[0] == "--async" {
+			p.hookAsync = true
+			hookArgs = hookArgs[1:]
+		}
+		if len(hookArgs) != 1 {
+			return p, false
+		}
+		p.hookEvent = hookArgs[0]
+		return p, true
 	}
 
-	// <url> (proxy mode)
-	if len(args) != 1 {
-		fmt.Fprint(os.Stderr, usage)
-		return 2
+	// Optional positional URL.
+	switch len(args) {
+	case 0:
+		// No URL — config or default.
+		return p, true
+	case 1:
+		p.daemonURL = args[0]
+		return p, true
+	default:
+		return p, false
 	}
-	return runProxy(args[0])
 }
 
-func parseHook(rawURL string, args []string) int {
-	async := false
-	if len(args) >= 1 && args[0] == "--async" {
-		async = true
-		args = args[1:]
-	}
-	if len(args) != 1 {
+func run() int {
+	p, ok := parseArgs(os.Args[1:])
+	if !ok {
 		fmt.Fprint(os.Stderr, usage)
 		return 2
 	}
-	return runHook(rawURL, args[0], async)
+
+	if p.showVersion {
+		fmt.Printf("mcp-proxy %s\n", version)
+		return 0
+	}
+
+	if p.healthCheck {
+		return runHealthCheck(p.daemonURL)
+	}
+
+	// Load config profile (if requested).
+	var extraHeaders map[string]string
+	configURL := ""
+	if p.profile != "" {
+		prof, err := config.Load(p.profile)
+		if err != nil {
+			// Insecure permissions — print tilde path as specified.
+			fmt.Fprintf(os.Stderr, "mcp-proxy: %v\n", err)
+			return 1
+		}
+		configURL = prof.URL
+		extraHeaders = prof.Headers
+	}
+
+	// Resolve effective daemon URL:
+	//   positional URL > config URL > default.
+	daemonURL := p.daemonURL
+	if daemonURL == "" {
+		daemonURL = configURL
+	}
+	if daemonURL == "" {
+		daemonURL = config.DefaultURL
+	}
+
+	if p.hookEvent != "" {
+		return runHook(daemonURL, p.hookEvent, p.hookAsync, extraHeaders)
+	}
+	return runProxy(daemonURL, extraHeaders)
 }
 
 func runHealthCheck(rawURL string) int {
@@ -89,7 +167,7 @@ func runHealthCheck(rawURL string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), transport.DialTimeout+time.Second)
 	defer cancel()
 
-	conn, err := transport.Dial(ctx, rawURL, 0, logger)
+	conn, err := transport.Dial(ctx, rawURL, 0, nil, logger)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mcp-proxy: health check failed: %v\n", err)
 		return 1
@@ -99,7 +177,7 @@ func runHealthCheck(rawURL string) int {
 	return 0
 }
 
-func runProxy(rawURL string) int {
+func runProxy(rawURL string, extraHeaders map[string]string) int {
 	logger, logCloser := debuglog.FromEnv()
 	defer logCloser.Close()
 
@@ -113,7 +191,7 @@ func runProxy(rawURL string) int {
 	logger.Debug("session key resolved", "key", sessionKey)
 
 	dial := func(dialCtx context.Context) (reconnect.Conn, error) {
-		conn, err := transport.Dial(dialCtx, rawURL, sessionKey, logger)
+		conn, err := transport.Dial(dialCtx, rawURL, sessionKey, extraHeaders, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -136,7 +214,7 @@ func runProxy(rawURL string) int {
 	return 0
 }
 
-func runHook(rawURL string, event string, async bool) int {
+func runHook(rawURL string, event string, async bool, extraHeaders map[string]string) int {
 	logger, logCloser := debuglog.FromEnv()
 	defer logCloser.Close()
 
@@ -170,7 +248,7 @@ func runHook(rawURL string, event string, async bool) int {
 	dialCtx, dialCancel := context.WithTimeout(context.Background(), transport.DialTimeout+time.Second)
 	defer dialCancel()
 
-	conn, err := transport.DialHook(dialCtx, hookURL, sessionKey, logger)
+	conn, err := transport.DialHook(dialCtx, hookURL, sessionKey, extraHeaders, logger)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mcp-proxy: %v\n", err)
 		return 1
