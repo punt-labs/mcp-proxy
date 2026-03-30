@@ -55,6 +55,7 @@ url = "ws://example.com/mcp"
 	require.ErrorAs(t, err, &permErr)
 	assert.Contains(t, permErr.Error(), "insecure permissions")
 	assert.Contains(t, permErr.Error(), "quarry.toml")
+	assert.Contains(t, permErr.Error(), "group/other bits must not be set")
 }
 
 func TestLoad_MissingSection_Fallback(t *testing.T) {
@@ -97,6 +98,15 @@ url = "ws://remote.host:9999/mcp"
 	require.NoError(t, err)
 	assert.Equal(t, "ws://remote.host:9999/mcp", p.URL)
 	assert.Empty(t, p.Headers)
+}
+
+func TestLoad_MalformedTOML_Error(t *testing.T) {
+	home := writeConfig(t, "quarry", `this is not valid TOML ][[[`, 0o600)
+	setHome(t, home)
+
+	_, err := config.Load("quarry")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parsing")
 }
 
 func TestLoad_RestrictivePermissions_OK(t *testing.T) {

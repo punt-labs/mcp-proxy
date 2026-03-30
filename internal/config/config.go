@@ -28,13 +28,14 @@ type Profile struct {
 }
 
 // InsecurePermissionsError is returned when the config file has permissions
-// wider than 0600.
+// that allow group or other access (any bit beyond owner read/write is set).
 type InsecurePermissionsError struct {
 	Path string
+	Mode os.FileMode
 }
 
 func (e *InsecurePermissionsError) Error() string {
-	return fmt.Sprintf("config file has insecure permissions (expected 0600): %s", e.Path)
+	return fmt.Sprintf("config file has insecure permissions (%04o, group/other bits must not be set): %s", e.Mode, e.Path)
 }
 
 // Load reads the profile from ~/.punt-labs/mcp-proxy/<profile>.toml.
@@ -72,7 +73,7 @@ func Load(profile string) (Profile, error) {
 	}
 
 	if perm := info.Mode().Perm(); perm&^0o600 != 0 {
-		return Profile{}, &InsecurePermissionsError{Path: tilde(path)}
+		return Profile{}, &InsecurePermissionsError{Path: tilde(path), Mode: perm}
 	}
 
 	var raw map[string]toml.Primitive
