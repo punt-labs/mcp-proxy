@@ -23,9 +23,9 @@ var version = "dev"
 
 const usage = `Usage: mcp-proxy [--config <profile>] [<daemon-url>]
        mcp-proxy --version
-       mcp-proxy --health [<daemon-url>]
-       mcp-proxy <daemon-url> --hook <event>
-       mcp-proxy <daemon-url> --hook --async <event>
+       mcp-proxy [--config <profile>] --health [<daemon-url>]
+       mcp-proxy [--config <profile>] [<daemon-url>] --hook <event>
+       mcp-proxy [--config <profile>] [<daemon-url>] --hook --async <event>
 
 Examples:
   mcp-proxy ws://localhost:8080/mcp              # MCP bridge (long-running)
@@ -34,6 +34,7 @@ Examples:
   mcp-proxy --health ws://localhost:8080/mcp     # Health check (explicit URL)
   mcp-proxy --config quarry --health             # Health check using config URL
   mcp-proxy ws://localhost:8080 --hook PreToolUse        # Sync hook relay
+  mcp-proxy --config quarry --hook PreToolUse            # Hook relay using config URL
   mcp-proxy ws://localhost:8080 --hook --async SessionEnd # Async hook relay
 `
 
@@ -88,10 +89,22 @@ func parseArgs(args []string) (parsedArgs, bool) {
 		return p, true
 	}
 
-	// <url> --hook [--async] <event>
-	if len(args) >= 3 && args[1] == "--hook" {
-		p.daemonURL = args[0]
-		hookArgs := args[2:]
+	// [<url>] --hook [--async] <event>
+	// URL is optional when --config is provided; falls back to config/default in run().
+	hookIdx := -1
+	if len(args) >= 1 && args[0] == "--hook" {
+		hookIdx = 0
+	} else if len(args) >= 2 && args[1] == "--hook" {
+		hookIdx = 1
+	}
+	if hookIdx >= 0 {
+		if hookIdx == 1 {
+			p.daemonURL = args[0]
+		} else if p.profile == "" {
+			// No URL and no config — can't resolve a daemon address.
+			return p, false
+		}
+		hookArgs := args[hookIdx+1:]
 		if len(hookArgs) >= 1 && hookArgs[0] == "--async" {
 			p.hookAsync = true
 			hookArgs = hookArgs[1:]
