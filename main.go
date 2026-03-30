@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -55,12 +54,6 @@ type parsedArgs struct {
 func parseArgs(args []string) (parsedArgs, bool) {
 	var p parsedArgs
 
-	// --version (must be the only arg)
-	if len(args) == 1 && args[0] == "--version" {
-		p.showVersion = true
-		return p, true
-	}
-
 	// Consume named flags first, leaving positional args.
 	rest := args[:0:0]
 	for i := 0; i < len(args); i++ {
@@ -71,13 +64,19 @@ func parseArgs(args []string) (parsedArgs, bool) {
 			}
 			p.profile = args[i+1]
 			i++
+		case "--version":
+			p.showVersion = true
 		default:
 			rest = append(rest, args[i])
 		}
 	}
 	args = rest
 
-	// --health [<url>]  (URL is optional; falls back to config/default in run())
+	if p.showVersion {
+		return p, true
+	}
+
+	// --health [<url>]  (URL is optional when --config is provided)
 	if len(args) >= 1 && args[0] == "--health" {
 		if len(args) > 2 {
 			return p, false
@@ -85,6 +84,9 @@ func parseArgs(args []string) (parsedArgs, bool) {
 		p.healthCheck = true
 		if len(args) == 2 {
 			p.daemonURL = args[1]
+		} else if p.profile == "" {
+			// --health with no URL requires --config to supply one.
+			return p, false
 		}
 		return p, true
 	}
@@ -241,28 +243,15 @@ func runHook(rawURL string, event string, async bool, extraHeaders map[string]st
 	sessionKey := session.FindSessionKey()
 	logger.Debug("hook mode", "event", event, "async", async, "session_key", sessionKey)
 
-	// Validate and append /hook to the base URL.
+	// Build the hook URL: strip any existing path (e.g., /mcp from config/default)
+	// and append /hook. The hook endpoint is always at <scheme>://<host>/hook.
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mcp-proxy: invalid URL: %v\n", err)
 		return 2
 	}
-	trimmedPath := strings.TrimRight(u.Path, "/")
-	if trimmedPath != "" && trimmedPath != "/hook" {
-		fmt.Fprintf(os.Stderr, "mcp-proxy: hook mode expects a base URL (e.g., ws://host:port), got path %q\n", u.Path)
-		return 2
-	}
-	var hookURL string
-	if trimmedPath == "/hook" {
-		u.Path = "/hook"
-		hookURL = u.String()
-	} else {
-		hookURL, err = appendPath(rawURL, "hook")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "mcp-proxy: invalid URL: %v\n", err)
-			return 2
-		}
-	}
+	u.Path = "/hook"
+	hookURL := u.String()
 
 	// Dial with standard timeout.
 	dialCtx, dialCancel := context.WithTimeout(context.Background(), transport.DialTimeout+time.Second)
@@ -292,16 +281,6 @@ func runHook(rawURL string, event string, async bool, extraHeaders map[string]st
 		return 1
 	}
 	return 0
-}
-
-// appendPath appends a path segment to a WebSocket URL.
-func appendPath(rawURL, segment string) (string, error) {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return "", err
-	}
-	u.Path = strings.TrimRight(u.Path, "/") + "/" + segment
-	return u.String(), nil
 }
 
 // forceExitOnSecondSignal waits for the context to be cancelled (first signal),

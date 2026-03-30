@@ -98,11 +98,11 @@ func dial(ctx context.Context, rawURL string, sessionKey int, subprotocols []str
 	}
 	// Build request headers. MCP_PROXY_TOKEN sets Authorization; extraHeaders
 	// are layered on top and may override it.
-	if token := os.Getenv("MCP_PROXY_TOKEN"); token != "" {
+	token := os.Getenv("MCP_PROXY_TOKEN")
+	if token != "" {
 		opts.HTTPHeader = http.Header{
 			"Authorization": []string{"Bearer " + token},
 		}
-		logger.Debug("using bearer token from MCP_PROXY_TOKEN")
 	}
 	if len(extraHeaders) > 0 {
 		if opts.HTTPHeader == nil {
@@ -112,6 +112,14 @@ func dial(ctx context.Context, rawURL string, sessionKey int, subprotocols []str
 			opts.HTTPHeader.Set(k, v)
 		}
 		logger.Debug("merging extra headers from config", "count", len(extraHeaders))
+	}
+	// Log the effective auth source after all headers are merged.
+	if token != "" {
+		if opts.HTTPHeader.Get("Authorization") == "Bearer "+token {
+			logger.Debug("using bearer token from MCP_PROXY_TOKEN")
+		} else {
+			logger.Debug("MCP_PROXY_TOKEN bearer token overridden by config Authorization header")
+		}
 	}
 
 	conn, _, err := websocket.Dial(dialCtx, u.String(), opts)
