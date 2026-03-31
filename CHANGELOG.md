@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `ca_cert` field in profile TOML (`~/.punt-labs/mcp-proxy/<profile>.toml`) —
+  path to a PEM CA certificate for TLS verification. When set, WebSocket dials
+  use a custom cert pool pinned to that CA (system roots excluded). Required for
+  quarry remote connections over `wss://` with a self-signed CA.
+- `CACertError` typed error for cert-file load failures (missing file, invalid PEM).
+
+### Security
+
+- TLS minimum version raised to TLS 1.3 when a CA cert path is configured.
+
 ## [0.3.0] - 2026-03-30
 
 ### Added
