@@ -29,7 +29,7 @@ func TestSyncRequestResponse(t *testing.T) {
 	defer cancel()
 
 	logger := debuglog.Nop()
-	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, logger)
+	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, "", logger)
 	require.NoError(t, err)
 	conn.SetReadLimit(1024 * 1024)
 	defer conn.CloseNow()
@@ -56,7 +56,7 @@ func TestSyncErrorResponse(t *testing.T) {
 	defer cancel()
 
 	logger := debuglog.Nop()
-	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, logger)
+	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, "", logger)
 	require.NoError(t, err)
 	conn.SetReadLimit(1024 * 1024)
 	defer conn.CloseNow()
@@ -80,7 +80,7 @@ func TestAsyncFireAndForget(t *testing.T) {
 	defer cancel()
 
 	logger := debuglog.Nop()
-	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, logger)
+	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, "", logger)
 	require.NoError(t, err)
 	conn.SetReadLimit(1024 * 1024)
 	// No defer CloseNow — sendNotification does a graceful close.
@@ -136,7 +136,7 @@ func TestStdinPayloadPassthrough(t *testing.T) {
 	defer cancel()
 
 	logger := debuglog.Nop()
-	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, logger)
+	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, "", logger)
 	require.NoError(t, err)
 	conn.SetReadLimit(1024 * 1024)
 	defer conn.CloseNow()
@@ -163,7 +163,7 @@ func TestEmptyStdin(t *testing.T) {
 	defer cancel()
 
 	logger := debuglog.Nop()
-	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, logger)
+	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, "", logger)
 	require.NoError(t, err)
 	conn.SetReadLimit(1024 * 1024)
 	defer conn.CloseNow()
@@ -201,7 +201,7 @@ func TestEventNamePassthrough(t *testing.T) {
 			defer cancel()
 
 			logger := debuglog.Nop()
-			conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, logger)
+			conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, "", logger)
 			require.NoError(t, err)
 			conn.SetReadLimit(1024 * 1024)
 			defer conn.CloseNow()
@@ -238,7 +238,7 @@ func TestLargePayload(t *testing.T) {
 	defer cancel()
 
 	logger := debuglog.Nop()
-	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, logger)
+	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, "", logger)
 	require.NoError(t, err)
 	conn.SetReadLimit(1024 * 1024)
 	defer conn.CloseNow()
@@ -266,7 +266,7 @@ func TestAsyncDeliveryGuarantee(t *testing.T) {
 	defer cancel()
 
 	logger := debuglog.Nop()
-	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, logger)
+	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, "", logger)
 	require.NoError(t, err)
 	conn.SetReadLimit(1024 * 1024)
 
@@ -308,7 +308,7 @@ func TestNoEOFStdinDoesNotHang(t *testing.T) {
 	defer cancel()
 
 	logger := debuglog.Nop()
-	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, logger)
+	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, "", logger)
 	require.NoError(t, err)
 	conn.SetReadLimit(1024 * 1024)
 	defer conn.CloseNow()
@@ -350,7 +350,7 @@ func TestEmptyStdinNoEOF(t *testing.T) {
 	defer cancel()
 
 	logger := debuglog.Nop()
-	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, logger)
+	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, "", logger)
 	require.NoError(t, err)
 	conn.SetReadLimit(1024 * 1024)
 	defer conn.CloseNow()

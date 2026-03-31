@@ -256,7 +256,9 @@ readLoop:
 
 	d.mu.Lock()
 	d.disconnected = true
-	d.conn = nil
+	if d.conn == conn {
+		d.conn = nil
+	}
 	d.mu.Unlock()
 }
 
@@ -292,7 +294,9 @@ func (d *MockDaemon) handleHook(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		d.mu.Lock()
 		d.disconnected = true
-		d.conn = nil
+		if d.conn == conn {
+			d.conn = nil
+		}
 		d.mu.Unlock()
 	}()
 
