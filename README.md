@@ -53,7 +53,7 @@ For local daemons, auth is typically unnecessary — binding to `127.0.0.1` (the
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/punt-labs/mcp-proxy/65d3e15/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/punt-labs/mcp-proxy/32378ae/install.sh | sh
 ```
 
 <details>
@@ -74,7 +74,7 @@ Ensure `~/.local/bin` is on your `PATH`.
 <summary>Inspect before running</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/punt-labs/mcp-proxy/65d3e15/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/punt-labs/mcp-proxy/32378ae/install.sh -o install.sh
 cat install.sh
 sh install.sh
 ```
