@@ -27,7 +27,7 @@ type Profile struct {
 	Headers map[string]string
 	// CACert is the path to a PEM-encoded CA certificate used to verify
 	// TLS connections. Empty means use the system certificate pool.
-	CACert string `toml:"ca_cert"`
+	CACert string
 }
 
 // InsecurePermissionsError is returned when the config file has permissions

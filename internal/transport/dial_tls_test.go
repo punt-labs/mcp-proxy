@@ -216,6 +216,7 @@ func TestDial_WrongCACert_Rejected(t *testing.T) {
 	// The failure must be TLS verification.
 	var certErr *transport.CACertError
 	assert.False(t, errors.As(err, &certErr), "expected TLS verification error, not CACertError")
+	assert.Contains(t, err.Error(), "certificate", "expected TLS certificate verification error")
 }
 
 func TestDialHook_WrongCACert_Rejected(t *testing.T) {
@@ -240,4 +241,5 @@ func TestDialHook_WrongCACert_Rejected(t *testing.T) {
 
 	var certErr *transport.CACertError
 	assert.False(t, errors.As(err, &certErr), "expected TLS verification error, not CACertError")
+	assert.Contains(t, err.Error(), "certificate", "expected TLS certificate verification error")
 }
