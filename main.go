@@ -7,10 +7,10 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
+	"github.com/punt-labs/mcp-proxy/internal/config"
 	"github.com/punt-labs/mcp-proxy/internal/debuglog"
 	"github.com/punt-labs/mcp-proxy/internal/hook"
 	"github.com/punt-labs/mcp-proxy/internal/reconnect"
@@ -20,16 +20,20 @@ import (
 
 var version = "dev"
 
-const usage = `Usage: mcp-proxy <daemon-url>
+const usage = `Usage: mcp-proxy [--config <profile>] [<daemon-url>]
        mcp-proxy --version
-       mcp-proxy --health <daemon-url>
-       mcp-proxy <daemon-url> --hook <event>
-       mcp-proxy <daemon-url> --hook --async <event>
+       mcp-proxy [--config <profile>] --health [<daemon-url>]
+       mcp-proxy [--config <profile>] [<daemon-url>] --hook <event>
+       mcp-proxy [--config <profile>] [<daemon-url>] --hook --async <event>
 
 Examples:
   mcp-proxy ws://localhost:8080/mcp              # MCP bridge (long-running)
-  mcp-proxy --health ws://localhost:8080/mcp     # Health check
+  mcp-proxy --config quarry                      # Load URL and headers from ~/.punt-labs/mcp-proxy/quarry.toml
+  mcp-proxy --config quarry ws://override/mcp    # Config headers, positional URL wins
+  mcp-proxy --health ws://localhost:8080/mcp     # Health check (explicit URL)
+  mcp-proxy --config quarry --health             # Health check using config URL
   mcp-proxy ws://localhost:8080 --hook PreToolUse        # Sync hook relay
+  mcp-proxy --config quarry --hook PreToolUse            # Hook relay using config URL
   mcp-proxy ws://localhost:8080 --hook --async SessionEnd # Async hook relay
 `
 
@@ -37,51 +41,151 @@ func main() {
 	os.Exit(run())
 }
 
-func run() int {
-	args := os.Args[1:]
+// parsedArgs holds the result of argument parsing.
+type parsedArgs struct {
+	profile     string // --config <profile>, empty if not given
+	daemonURL   string // positional URL, empty if not given
+	healthCheck bool
+	hookEvent   string
+	hookAsync   bool
+	showVersion bool
+}
 
-	// --version
-	if len(args) == 1 && args[0] == "--version" {
+func parseArgs(args []string) (parsedArgs, bool) {
+	var p parsedArgs
+
+	// Consume named flags first, leaving positional args.
+	rest := args[:0:0]
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--config":
+			if i+1 >= len(args) || len(args[i+1]) == 0 || args[i+1][0] == '-' {
+				return p, false
+			}
+			p.profile = args[i+1]
+			i++
+		case "--version":
+			p.showVersion = true
+		default:
+			rest = append(rest, args[i])
+		}
+	}
+	args = rest
+
+	if p.showVersion {
+		// --version must be the only effective argument.
+		if p.profile != "" || len(args) > 0 {
+			return p, false
+		}
+		return p, true
+	}
+
+	// --health [<url>]  (URL is optional when --config is provided)
+	if len(args) >= 1 && args[0] == "--health" {
+		if len(args) > 2 {
+			return p, false
+		}
+		p.healthCheck = true
+		if len(args) == 2 {
+			p.daemonURL = args[1]
+		} else if p.profile == "" {
+			// --health with no URL requires --config to supply one.
+			return p, false
+		}
+		return p, true
+	}
+
+	// [<url>] --hook [--async] <event>
+	// URL is optional when --config is provided; falls back to config/default in run().
+	hookIdx := -1
+	if len(args) >= 1 && args[0] == "--hook" {
+		hookIdx = 0
+	} else if len(args) >= 2 && args[1] == "--hook" {
+		hookIdx = 1
+	}
+	if hookIdx >= 0 {
+		if hookIdx == 1 {
+			p.daemonURL = args[0]
+		} else if p.profile == "" {
+			// No URL and no config — can't resolve a daemon address.
+			return p, false
+		}
+		hookArgs := args[hookIdx+1:]
+		if len(hookArgs) >= 1 && hookArgs[0] == "--async" {
+			p.hookAsync = true
+			hookArgs = hookArgs[1:]
+		}
+		if len(hookArgs) != 1 {
+			return p, false
+		}
+		p.hookEvent = hookArgs[0]
+		return p, true
+	}
+
+	// Optional positional URL.
+	switch len(args) {
+	case 0:
+		// No URL is only valid when --config was supplied; otherwise usage error.
+		if p.profile == "" {
+			return p, false
+		}
+		return p, true
+	case 1:
+		p.daemonURL = args[0]
+		return p, true
+	default:
+		return p, false
+	}
+}
+
+func run() int {
+	p, ok := parseArgs(os.Args[1:])
+	if !ok {
+		fmt.Fprint(os.Stderr, usage)
+		return 2
+	}
+
+	if p.showVersion {
 		fmt.Printf("mcp-proxy %s\n", version)
 		return 0
 	}
 
-	// --health <url>
-	if len(args) >= 1 && args[0] == "--health" {
-		if len(args) != 2 {
-			fmt.Fprint(os.Stderr, usage)
-			return 2
+	// Load config profile (if requested) — applies to all modes including health check.
+	var extraHeaders map[string]string
+	configURL := ""
+	if p.profile != "" {
+		prof, err := config.Load(p.profile)
+		if err != nil {
+			// Insecure permissions — print tilde path as specified.
+			fmt.Fprintf(os.Stderr, "mcp-proxy: %v\n", err)
+			return 1
 		}
-		return runHealthCheck(args[1])
+		configURL = prof.URL
+		extraHeaders = prof.Headers
 	}
 
-	// <url> --hook [--async] <event>
-	if len(args) >= 3 && args[1] == "--hook" {
-		return parseHook(args[0], args[2:])
+	// Resolve effective daemon URL:
+	//   positional URL > config URL > default.
+	// Done before health-check so --config quarry --health uses config URL.
+	daemonURL := p.daemonURL
+	if daemonURL == "" {
+		daemonURL = configURL
+	}
+	if daemonURL == "" {
+		daemonURL = config.DefaultURL
 	}
 
-	// <url> (proxy mode)
-	if len(args) != 1 {
-		fmt.Fprint(os.Stderr, usage)
-		return 2
+	if p.healthCheck {
+		return runHealthCheck(daemonURL, extraHeaders)
 	}
-	return runProxy(args[0])
+
+	if p.hookEvent != "" {
+		return runHook(daemonURL, p.hookEvent, p.hookAsync, extraHeaders)
+	}
+	return runProxy(daemonURL, extraHeaders)
 }
 
-func parseHook(rawURL string, args []string) int {
-	async := false
-	if len(args) >= 1 && args[0] == "--async" {
-		async = true
-		args = args[1:]
-	}
-	if len(args) != 1 {
-		fmt.Fprint(os.Stderr, usage)
-		return 2
-	}
-	return runHook(rawURL, args[0], async)
-}
-
-func runHealthCheck(rawURL string) int {
+func runHealthCheck(rawURL string, extraHeaders map[string]string) int {
 	logger := debuglog.Nop()
 
 	// Safety-net timeout slightly beyond Dial's internal DialTimeout,
@@ -89,7 +193,7 @@ func runHealthCheck(rawURL string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), transport.DialTimeout+time.Second)
 	defer cancel()
 
-	conn, err := transport.Dial(ctx, rawURL, 0, logger)
+	conn, err := transport.Dial(ctx, rawURL, 0, extraHeaders, logger)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mcp-proxy: health check failed: %v\n", err)
 		return 1
@@ -99,7 +203,7 @@ func runHealthCheck(rawURL string) int {
 	return 0
 }
 
-func runProxy(rawURL string) int {
+func runProxy(rawURL string, extraHeaders map[string]string) int {
 	logger, logCloser := debuglog.FromEnv()
 	defer logCloser.Close()
 
@@ -113,7 +217,7 @@ func runProxy(rawURL string) int {
 	logger.Debug("session key resolved", "key", sessionKey)
 
 	dial := func(dialCtx context.Context) (reconnect.Conn, error) {
-		conn, err := transport.Dial(dialCtx, rawURL, sessionKey, logger)
+		conn, err := transport.Dial(dialCtx, rawURL, sessionKey, extraHeaders, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -136,41 +240,32 @@ func runProxy(rawURL string) int {
 	return 0
 }
 
-func runHook(rawURL string, event string, async bool) int {
+func runHook(rawURL string, event string, async bool, extraHeaders map[string]string) int {
 	logger, logCloser := debuglog.FromEnv()
 	defer logCloser.Close()
 
 	sessionKey := session.FindSessionKey()
 	logger.Debug("hook mode", "event", event, "async", async, "session_key", sessionKey)
 
-	// Validate and append /hook to the base URL.
+	// Build the hook URL: strip any existing path (e.g., /mcp from config/default)
+	// and append /hook. The hook endpoint is always at <scheme>://<host>/hook.
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mcp-proxy: invalid URL: %v\n", err)
 		return 2
 	}
-	trimmedPath := strings.TrimRight(u.Path, "/")
-	if trimmedPath != "" && trimmedPath != "/hook" {
-		fmt.Fprintf(os.Stderr, "mcp-proxy: hook mode expects a base URL (e.g., ws://host:port), got path %q\n", u.Path)
-		return 2
-	}
-	var hookURL string
-	if trimmedPath == "/hook" {
-		u.Path = "/hook"
-		hookURL = u.String()
-	} else {
-		hookURL, err = appendPath(rawURL, "hook")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "mcp-proxy: invalid URL: %v\n", err)
-			return 2
-		}
-	}
+	// Replace path with /hook; preserve any existing query params (e.g.,
+	// auth tokens) but clear fragment, which is not meaningful for WebSocket.
+	u.Path = "/hook"
+	u.RawPath = ""
+	u.Fragment = ""
+	hookURL := u.String()
 
 	// Dial with standard timeout.
 	dialCtx, dialCancel := context.WithTimeout(context.Background(), transport.DialTimeout+time.Second)
 	defer dialCancel()
 
-	conn, err := transport.DialHook(dialCtx, hookURL, sessionKey, logger)
+	conn, err := transport.DialHook(dialCtx, hookURL, sessionKey, extraHeaders, logger)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mcp-proxy: %v\n", err)
 		return 1
@@ -194,16 +289,6 @@ func runHook(rawURL string, event string, async bool) int {
 		return 1
 	}
 	return 0
-}
-
-// appendPath appends a path segment to a WebSocket URL.
-func appendPath(rawURL, segment string) (string, error) {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return "", err
-	}
-	u.Path = strings.TrimRight(u.Path, "/") + "/" + segment
-	return u.String(), nil
 }
 
 // forceExitOnSecondSignal waits for the context to be cancelled (first signal),

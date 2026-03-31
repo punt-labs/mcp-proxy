@@ -24,10 +24,11 @@ type MockDaemon struct {
 	// Write a message to this channel and the daemon will send it.
 	Push chan []byte
 
-	mu           sync.Mutex
-	sessionKey   string
-	authHeader   string
-	received     [][]byte
+	mu             sync.Mutex
+	sessionKey     string
+	authHeader     string
+	upgradeHeaders http.Header
+	received       [][]byte
 	connected    bool
 	disconnected bool
 	conn         *websocket.Conn
@@ -77,6 +78,16 @@ func (d *MockDaemon) AuthHeader() string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.authHeader
+}
+
+// Header returns the named HTTP header received on the last connection upgrade.
+func (d *MockDaemon) Header(name string) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.upgradeHeaders == nil {
+		return ""
+	}
+	return d.upgradeHeaders.Get(name)
 }
 
 // Received returns a copy of all messages received by the daemon.
@@ -146,6 +157,7 @@ func (d *MockDaemon) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	d.mu.Lock()
 	d.sessionKey = r.URL.Query().Get("session_key")
 	d.authHeader = r.Header.Get("Authorization")
+	d.upgradeHeaders = r.Header.Clone()
 	d.acceptErr = nil
 	d.pushErr = nil
 	d.mu.Unlock()
@@ -255,6 +267,7 @@ func (d *MockDaemon) handleHook(w http.ResponseWriter, r *http.Request) {
 	d.mu.Lock()
 	d.sessionKey = r.URL.Query().Get("session_key")
 	d.authHeader = r.Header.Get("Authorization")
+	d.upgradeHeaders = r.Header.Clone()
 	d.acceptErr = nil
 	d.mu.Unlock()
 
