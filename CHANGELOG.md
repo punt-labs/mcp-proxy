@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-03-30
+
 ### Added
 
 - `--config <profile>` flag reads `~/.punt-labs/mcp-proxy/<profile>.toml`, extracting `[<profile>].url` and `[<profile>.headers]` for use as daemon URL and WebSocket upgrade headers
