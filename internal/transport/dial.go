@@ -208,7 +208,10 @@ func tlsConfigWithCA(path string) (*tls.Config, error) {
 		return nil, &CACertError{Path: path}
 	}
 
-	return &tls.Config{RootCAs: pool}, nil
+	return &tls.Config{
+		RootCAs:    pool,
+		MinVersion: tls.VersionTLS13,
+	}, nil
 }
 
 func isConnectionRefused(err error) bool {

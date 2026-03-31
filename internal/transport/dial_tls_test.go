@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"net"
 	"net/http"
@@ -188,4 +189,55 @@ func TestDial_InvalidCACertPEM_Error(t *testing.T) {
 	var certErr *transport.CACertError
 	require.ErrorAs(t, err, &certErr)
 	assert.Contains(t, certErr.Error(), "no valid certificate blocks found")
+}
+
+func TestDial_WrongCACert_Rejected(t *testing.T) {
+	// A server cert signed by CA1 must be rejected when the client trusts only CA2.
+	ca1, ca1Cert, ca1Key := selfSignedCA(t)
+	_, ca2PEM, _ := selfSignedCA(t)
+
+	srv := tlsServerWithCA(t, ca1, ca1Key)
+
+	// Write CA2's PEM — the wrong CA — as the trusted cert.
+	dir := t.TempDir()
+	caFile := filepath.Join(dir, "ca2.crt")
+	require.NoError(t, os.WriteFile(caFile, ca2PEM, 0o600))
+
+	_ = ca1Cert // used only to sign the server cert
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	logger := debuglog.NewTestLogger(t).Logger
+	_, err := transport.Dial(ctx, wsURL(srv.URL)+"/", 1, nil, caFile, logger)
+	require.Error(t, err)
+
+	// The error must not be a CACertError — the cert file loaded fine.
+	// The failure must be TLS verification.
+	var certErr *transport.CACertError
+	assert.False(t, errors.As(err, &certErr), "expected TLS verification error, not CACertError")
+}
+
+func TestDialHook_WrongCACert_Rejected(t *testing.T) {
+	// Same property as TestDial_WrongCACert_Rejected, but through DialHook.
+	ca1, ca1Cert, ca1Key := selfSignedCA(t)
+	_, ca2PEM, _ := selfSignedCA(t)
+
+	srv := tlsServerWithCA(t, ca1, ca1Key)
+
+	dir := t.TempDir()
+	caFile := filepath.Join(dir, "ca2.crt")
+	require.NoError(t, os.WriteFile(caFile, ca2PEM, 0o600))
+
+	_ = ca1Cert // used only to sign the server cert
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	logger := debuglog.NewTestLogger(t).Logger
+	_, err := transport.DialHook(ctx, wsURL(srv.URL)+"/", 1, nil, caFile, logger)
+	require.Error(t, err)
+
+	var certErr *transport.CACertError
+	assert.False(t, errors.As(err, &certErr), "expected TLS verification error, not CACertError")
 }
