@@ -150,15 +150,26 @@ func dial(ctx context.Context, rawURL string, sessionKey int, subprotocols []str
 
 	// Build a custom TLS config when a CA cert path is provided. An error here
 	// is always a configuration mistake — don't silently fall back to system roots.
-	if caCertPath != "" {
+	// CA certs only apply to TLS connections; ws:// never does a TLS handshake.
+	if caCertPath != "" && u.Scheme == "wss" {
 		tlsCfg, err := tlsConfigWithCA(caCertPath)
 		if err != nil {
 			return nil, err
 		}
-		opts.HTTPClient = &http.Client{
-			Transport: &http.Transport{TLSClientConfig: tlsCfg},
+		base, ok := http.DefaultTransport.(*http.Transport)
+		if !ok {
+			// Should not happen in normal operation, but don't panic.
+			opts.HTTPClient = &http.Client{
+				Transport: &http.Transport{TLSClientConfig: tlsCfg},
+			}
+		} else {
+			t := base.Clone()
+			t.TLSClientConfig = tlsCfg
+			opts.HTTPClient = &http.Client{Transport: t}
 		}
 		logger.Debug("using custom CA cert", "path", caCertPath)
+	} else if caCertPath != "" {
+		logger.Debug("ignoring ca_cert for non-TLS scheme", "scheme", u.Scheme)
 	}
 
 	conn, _, err := websocket.Dial(dialCtx, u.String(), opts)
