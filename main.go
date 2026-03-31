@@ -152,6 +152,7 @@ func run() int {
 
 	// Load config profile (if requested) — applies to all modes including health check.
 	var extraHeaders map[string]string
+	var caCert string
 	configURL := ""
 	if p.profile != "" {
 		prof, err := config.Load(p.profile)
@@ -162,6 +163,7 @@ func run() int {
 		}
 		configURL = prof.URL
 		extraHeaders = prof.Headers
+		caCert = prof.CACert
 	}
 
 	// Resolve effective daemon URL:
@@ -176,16 +178,16 @@ func run() int {
 	}
 
 	if p.healthCheck {
-		return runHealthCheck(daemonURL, extraHeaders)
+		return runHealthCheck(daemonURL, extraHeaders, caCert)
 	}
 
 	if p.hookEvent != "" {
-		return runHook(daemonURL, p.hookEvent, p.hookAsync, extraHeaders)
+		return runHook(daemonURL, p.hookEvent, p.hookAsync, extraHeaders, caCert)
 	}
-	return runProxy(daemonURL, extraHeaders)
+	return runProxy(daemonURL, extraHeaders, caCert)
 }
 
-func runHealthCheck(rawURL string, extraHeaders map[string]string) int {
+func runHealthCheck(rawURL string, extraHeaders map[string]string, caCert string) int {
 	logger := debuglog.Nop()
 
 	// Safety-net timeout slightly beyond Dial's internal DialTimeout,
@@ -193,7 +195,7 @@ func runHealthCheck(rawURL string, extraHeaders map[string]string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), transport.DialTimeout+time.Second)
 	defer cancel()
 
-	conn, err := transport.Dial(ctx, rawURL, 0, extraHeaders, logger)
+	conn, err := transport.Dial(ctx, rawURL, 0, extraHeaders, caCert, logger)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mcp-proxy: health check failed: %v\n", err)
 		return 1
@@ -203,7 +205,7 @@ func runHealthCheck(rawURL string, extraHeaders map[string]string) int {
 	return 0
 }
 
-func runProxy(rawURL string, extraHeaders map[string]string) int {
+func runProxy(rawURL string, extraHeaders map[string]string, caCert string) int {
 	logger, logCloser := debuglog.FromEnv()
 	defer logCloser.Close()
 
@@ -217,7 +219,7 @@ func runProxy(rawURL string, extraHeaders map[string]string) int {
 	logger.Debug("session key resolved", "key", sessionKey)
 
 	dial := func(dialCtx context.Context) (reconnect.Conn, error) {
-		conn, err := transport.Dial(dialCtx, rawURL, sessionKey, extraHeaders, logger)
+		conn, err := transport.Dial(dialCtx, rawURL, sessionKey, extraHeaders, caCert, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -240,7 +242,7 @@ func runProxy(rawURL string, extraHeaders map[string]string) int {
 	return 0
 }
 
-func runHook(rawURL string, event string, async bool, extraHeaders map[string]string) int {
+func runHook(rawURL string, event string, async bool, extraHeaders map[string]string, caCert string) int {
 	logger, logCloser := debuglog.FromEnv()
 	defer logCloser.Close()
 
@@ -265,7 +267,7 @@ func runHook(rawURL string, event string, async bool, extraHeaders map[string]st
 	dialCtx, dialCancel := context.WithTimeout(context.Background(), transport.DialTimeout+time.Second)
 	defer dialCancel()
 
-	conn, err := transport.DialHook(dialCtx, hookURL, sessionKey, extraHeaders, logger)
+	conn, err := transport.DialHook(dialCtx, hookURL, sessionKey, extraHeaders, caCert, logger)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mcp-proxy: %v\n", err)
 		return 1

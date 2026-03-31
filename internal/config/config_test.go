@@ -143,3 +143,39 @@ url = "ws://x/mcp"
 	var permErr *config.InsecurePermissionsError
 	assert.True(t, errors.As(err, &permErr))
 }
+
+func TestLoad_CACert_Present(t *testing.T) {
+	home := writeConfig(t, "quarry", `[quarry]
+url = "wss://example.com/mcp"
+ca_cert = "/home/user/.punt-labs/mcp-proxy/quarry-ca.crt"
+`, 0o600)
+	setHome(t, home)
+
+	p, err := config.Load("quarry")
+	require.NoError(t, err)
+	assert.Equal(t, "/home/user/.punt-labs/mcp-proxy/quarry-ca.crt", p.CACert)
+}
+
+func TestLoad_CACert_Absent(t *testing.T) {
+	home := writeConfig(t, "quarry", `[quarry]
+url = "ws://example.com/mcp"
+`, 0o600)
+	setHome(t, home)
+
+	p, err := config.Load("quarry")
+	require.NoError(t, err)
+	assert.Empty(t, p.CACert)
+}
+
+func TestLoad_CACert_NonExistentPath_LoadedAsString(t *testing.T) {
+	// Path validation is the transport's job; config only loads the string value.
+	home := writeConfig(t, "quarry", `[quarry]
+url = "wss://example.com/mcp"
+ca_cert = "/does/not/exist/ca.crt"
+`, 0o600)
+	setHome(t, home)
+
+	p, err := config.Load("quarry")
+	require.NoError(t, err)
+	assert.Equal(t, "/does/not/exist/ca.crt", p.CACert)
+}

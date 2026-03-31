@@ -3,6 +3,8 @@ package transport
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,6 +17,24 @@ import (
 
 	"github.com/coder/websocket"
 )
+
+// CACertError is returned when the CA certificate file cannot be read or
+// contains no valid PEM certificate blocks.
+type CACertError struct {
+	Path string
+	Err  error
+}
+
+func (e *CACertError) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("loading CA cert %q: %v", e.Path, e.Err)
+	}
+	return fmt.Sprintf("loading CA cert %q: no valid certificate blocks found", e.Path)
+}
+
+func (e *CACertError) Unwrap() error {
+	return e.Err
+}
 
 // DialTimeout is the maximum duration for a WebSocket dial attempt.
 const DialTimeout = 5 * time.Second
@@ -58,8 +78,11 @@ func (e *InvalidURLError) Unwrap() error {
 // extraHeaders are merged into the HTTP upgrade request headers. They extend
 // (and may override) any headers already set by environment variables such as
 // MCP_PROXY_TOKEN.
-func Dial(ctx context.Context, rawURL string, sessionKey int, extraHeaders map[string]string, logger *slog.Logger) (*websocket.Conn, error) {
-	return dial(ctx, rawURL, sessionKey, []string{"mcp"}, extraHeaders, logger)
+//
+// caCertPath is the path to a PEM-encoded CA certificate for TLS verification.
+// Empty means use the system certificate pool.
+func Dial(ctx context.Context, rawURL string, sessionKey int, extraHeaders map[string]string, caCertPath string, logger *slog.Logger) (*websocket.Conn, error) {
+	return dial(ctx, rawURL, sessionKey, []string{"mcp"}, extraHeaders, caCertPath, logger)
 }
 
 // DialHook connects to the daemon at rawURL without any subprotocol,
@@ -67,11 +90,14 @@ func Dial(ctx context.Context, rawURL string, sessionKey int, extraHeaders map[s
 // connections on the /hook endpoint.
 //
 // extraHeaders are merged into the HTTP upgrade request headers.
-func DialHook(ctx context.Context, rawURL string, sessionKey int, extraHeaders map[string]string, logger *slog.Logger) (*websocket.Conn, error) {
-	return dial(ctx, rawURL, sessionKey, nil, extraHeaders, logger)
+//
+// caCertPath is the path to a PEM-encoded CA certificate for TLS verification.
+// Empty means use the system certificate pool.
+func DialHook(ctx context.Context, rawURL string, sessionKey int, extraHeaders map[string]string, caCertPath string, logger *slog.Logger) (*websocket.Conn, error) {
+	return dial(ctx, rawURL, sessionKey, nil, extraHeaders, caCertPath, logger)
 }
 
-func dial(ctx context.Context, rawURL string, sessionKey int, subprotocols []string, extraHeaders map[string]string, logger *slog.Logger) (*websocket.Conn, error) {
+func dial(ctx context.Context, rawURL string, sessionKey int, subprotocols []string, extraHeaders map[string]string, caCertPath string, logger *slog.Logger) (*websocket.Conn, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, &InvalidURLError{URL: rawURL, Err: err}
@@ -122,6 +148,19 @@ func dial(ctx context.Context, rawURL string, sessionKey int, subprotocols []str
 		}
 	}
 
+	// Build a custom TLS config when a CA cert path is provided. An error here
+	// is always a configuration mistake — don't silently fall back to system roots.
+	if caCertPath != "" {
+		tlsCfg, err := tlsConfigWithCA(caCertPath)
+		if err != nil {
+			return nil, err
+		}
+		opts.HTTPClient = &http.Client{
+			Transport: &http.Transport{TLSClientConfig: tlsCfg},
+		}
+		logger.Debug("using custom CA cert", "path", caCertPath)
+	}
+
 	conn, _, err := websocket.Dial(dialCtx, u.String(), opts)
 	if err != nil {
 		addr := u.Host
@@ -154,6 +193,22 @@ func dial(ctx context.Context, rawURL string, sessionKey int, subprotocols []str
 
 	logger.Debug("connected", "host", u.Host)
 	return conn, nil
+}
+
+// tlsConfigWithCA builds a tls.Config that trusts only the CA cert at path.
+// System roots are not included; the pool is pinned to the provided cert.
+func tlsConfigWithCA(path string) (*tls.Config, error) {
+	pem, err := os.ReadFile(path)
+	if err != nil {
+		return nil, &CACertError{Path: path, Err: err}
+	}
+
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		return nil, &CACertError{Path: path}
+	}
+
+	return &tls.Config{RootCAs: pool}, nil
 }
 
 func isConnectionRefused(err error) bool {
