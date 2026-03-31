@@ -1,4 +1,4 @@
-.PHONY: help lint docs test test-e2e check format build clean dist cover
+.PHONY: help lint docs test test-e2e check format build install clean dist cover
 
 VERSION ?= dev
 LDFLAGS      := -X main.version=$(VERSION)
@@ -27,6 +27,10 @@ format: ## Format code
 
 build: ## Build binary
 	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o mcp-proxy .
+
+install: build ## Install binary to ~/.local/bin
+	install -d ~/.local/bin
+	install -m 0755 mcp-proxy ~/.local/bin/mcp-proxy
 
 clean: ## Remove build artifacts
 	rm -f mcp-proxy coverage.out
