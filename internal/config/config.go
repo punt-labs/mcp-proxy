@@ -25,6 +25,9 @@ type Profile struct {
 	URL string
 	// Headers are additional HTTP headers to send on the WebSocket upgrade.
 	Headers map[string]string
+	// CACert is the path to a PEM-encoded CA certificate used to verify
+	// TLS connections. Empty means use the system certificate pool.
+	CACert string
 }
 
 // InsecurePermissionsError is returned when the config file has permissions
@@ -96,6 +99,7 @@ func Load(profile string) (Profile, error) {
 	type wireProfile struct {
 		URL     string            `toml:"url"`
 		Headers map[string]string `toml:"headers"`
+		CACert  string            `toml:"ca_cert"`
 	}
 	var wp wireProfile
 	if err := meta.PrimitiveDecode(prim, &wp); err != nil {
