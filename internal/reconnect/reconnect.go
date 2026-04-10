@@ -247,6 +247,10 @@ func runConnection(
 	}()
 
 	// Replay handshake on reconnect, before retrying pending messages.
+	// Both frames are written without waiting for the daemon's initialize
+	// response in between. This is safe because MCP daemons (Python SDK)
+	// process inbound messages sequentially: initialize is fully handled
+	// before notifications/initialized is read from the WebSocket buffer.
 	if isReconnect && hs.cached() {
 		swallowCh <- hs.initID
 		if err := conn.Write(connCtx, websocket.MessageText, hs.initRequest); err != nil {
@@ -282,6 +286,7 @@ func runConnection(
 			<-readerDone
 			return pending, fmt.Errorf("writing pending to daemon: %w", err)
 		}
+		hs.sniff(pending)
 		pending = nil
 	}
 
@@ -314,10 +319,8 @@ func runConnection(
 				<-readerDone
 				return line, fmt.Errorf("writing to daemon: %w", err)
 			}
-			// Sniff handshake frames so we can replay them on reconnect.
-			if !hs.ready() {
-				hs.sniff(line)
-			}
+			// Sniff handshake frames so we can replay the latest on reconnect.
+			hs.sniff(line)
 
 		case <-connCtx.Done():
 			// Reader detected disconnect or parent context cancelled.

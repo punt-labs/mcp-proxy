@@ -388,9 +388,13 @@ func mcpHandler(version func() string) func([]byte) []byte {
 		}
 		switch env.Method {
 		case "initialize":
+			id := json.RawMessage("null")
+			if len(env.ID) > 0 {
+				id = env.ID
+			}
 			return []byte(fmt.Sprintf(
 				`{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-03-26","capabilities":{},"serverInfo":{"name":"mock","version":"%s"}}}`,
-				env.ID, version()))
+				id, version()))
 		case "notifications/initialized":
 			return nil // notification — no response
 		default:

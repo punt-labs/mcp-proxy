@@ -38,11 +38,6 @@ func (h *handshake) sniff(line []byte) {
 	}
 }
 
-// ready reports whether both handshake frames have been cached.
-func (h *handshake) ready() bool {
-	return h.initRequest != nil && h.initialized != nil
-}
-
 // cached reports whether at least the initialize request has been cached.
 func (h *handshake) cached() bool {
 	return h.initRequest != nil
