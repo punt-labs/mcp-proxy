@@ -776,6 +776,83 @@ Stripping and re-adding works but is fragile if the daemon's hook endpoint ever 
 
 ---
 
+## DES-016: MCP Handshake Replay on Reconnect
+
+**Date:** 2026-04-09
+**Status:** PROPOSED
+**Topic:** Replaying `initialize` / `notifications/initialized` after daemon reconnect
+**Bead:** mcp-lo3
+**Downstream:** quarry-mddj
+
+### Problem
+
+After a daemon restart, the proxy reconnects the WebSocket (DES-009) but never replays the MCP lifecycle handshake. Daemons that open a fresh `ServerSession` per connection (quarry, biff, vox) require `initialize` before answering tool calls. Claude Code sends `initialize` once at session start. Post-reconnect `tools/call` messages land on an uninitialized server and hang. User must restart Claude Code every time a daemon bounces.
+
+### Design
+
+Narrow exception to DES-004 (opaque NDJSON forwarding), following the precedent set by DES-011 (hook response parsing).
+
+**Cache on first connection:**
+
+1. In the writer path of `runConnection`, parse each outgoing line's top-level `method` field.
+2. When `method` equals `"initialize"`, cache the verbatim bytes and extract the `id` field.
+3. When `method` equals `"notifications/initialized"`, cache the verbatim bytes.
+4. Both frames pass through to the daemon unchanged on the first connection.
+
+**Replay on reconnect:**
+
+1. At the top of each subsequent `runConnection` call — before retrying any `pending` line, before entering the `select` loop — write the cached `initialize` request to the new connection.
+2. Read the daemon's `initialize` response and discard it (the client already has one from the original handshake).
+3. Write the cached `notifications/initialized` notification.
+4. Resume normal forwarding.
+
+**Parsing scope:** The proxy reads only `method` (string) and `id` (any JSON value) from top-level fields. No schema validation, no inspection of `params`, `result`, or `error`. This is the same depth as DES-011's response parsing.
+
+### Why Cache Verbatim Bytes
+
+The cached frames include the client's original `protocolVersion`, `capabilities`, and `clientInfo`. Replaying them verbatim ensures the daemon sees exactly what the client negotiated. No JSON construction, no field mapping, no version drift.
+
+### Why Swallow the Replayed Response
+
+The daemon responds to `initialize` with its own `protocolVersion`, `capabilities`, and `serverInfo`, keyed by the same `id` the client used. Forwarding this to stdout would deliver a second response for an `id` the client already resolved. MCP clients (Claude Code) do not expect duplicate responses.
+
+### Trade-off: Stale Capabilities After Daemon Upgrade
+
+If the daemon was upgraded between connections, its `initialize` response may advertise different capabilities than the original. The proxy swallows this response, so the client operates with the original capability set. This is acceptable because:
+
+1. Daemon upgrades mid-session are rare (daemons restart from crashes or deploys, not capability changes).
+2. The user can restart Claude Code to get fresh capabilities.
+3. Detecting and propagating capability changes would require the proxy to diff `initialize` responses and synthesize a client notification — far beyond the scope of a reconnect fix.
+
+Document this as a known limitation. Revisit if daemons begin changing capabilities between restarts.
+
+### Edge Cases
+
+- **First connection drops before `initialize` sent:** Cache is empty, nothing to replay. Falls back to current behavior (client sends whatever it sends next). This is correct — the client's MCP session never fully initialized, so there's nothing to restore.
+- **`notifications/initialized` never arrives:** Only `initialize` is cached. Replay sends `initialize` only. The daemon may reject subsequent RPCs, but this matches the client's actual protocol state. Do not synthesize a notification the client never sent.
+- **Client sends `initialize` more than once:** Cache the latest. MCP spec does not define re-initialization, but if a client does it, the proxy should replay the most recent version.
+
+### Rejected: ID Remapping
+
+The cached `initialize` is replayed with the client's original `id`. Clients use monotonic integer IDs, so the original `id` (typically `0` or `1`) will not collide with post-reconnect request IDs (which are higher). If a collision were possible, the proxy would need to generate a synthetic ID and remap the swallowed response — unnecessary complexity for a scenario that doesn't occur in practice. Write a test to confirm.
+
+### Rejected: Daemon-Side Idempotent Initialize
+
+Making daemons accept `initialize` on an already-initialized session would solve the problem without proxy changes. Rejected because:
+
+1. It requires changes to every daemon (quarry, biff, vox, lux) rather than one fix in the proxy.
+2. The MCP Python SDK's `ServerSession` is not designed for re-initialization — making it idempotent requires forking or monkey-patching the SDK.
+3. The proxy is the correct layer: it owns connection lifecycle (DES-009) and already has a precedent for narrow protocol awareness (DES-011).
+
+### Related
+
+- DES-004: Opaque NDJSON (this ADR is a narrow exception)
+- DES-009: Reconnect on Daemon Disconnect (this ADR extends reconnect behavior)
+- DES-011: Hook Relay Mode (precedent for protocol-aware exception)
+- mcp-proxy-qlo: In-flight request error synthesis (shares request-ID tracking infrastructure)
+
+---
+
 ## Open Questions
 
 1. ~~**Daemon auto-start.** Proxy starts daemon if missing, or always user's responsibility?~~ Settled: no auto-start (DES-005), but reconnect with backoff (DES-009) handles daemon restarts transparently.

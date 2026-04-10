@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Replay MCP `initialize`/`notifications/initialized` handshake on WebSocket
+  reconnect. Daemons that open a fresh server session per connection (quarry,
+  biff, vox) no longer hang after a daemon restart — the proxy automatically
+  re-establishes the MCP handshake. (mcp-lo3)
+
 ## [0.4.0] - 2026-04-01
 
 ### Added

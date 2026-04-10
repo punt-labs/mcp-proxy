@@ -9,7 +9,9 @@ package reconnect
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -96,8 +98,10 @@ func RunWithConfig(ctx context.Context, stdin io.Reader, stdout io.Writer, dial 
 		}
 	}()
 
-	var pending []byte // message consumed from channel but not yet written
+	var pending []byte
+	var hs handshake
 	attempt := 0
+	connNum := 0
 
 	for {
 		if ctx.Err() != nil {
@@ -123,10 +127,12 @@ func RunWithConfig(ctx context.Context, stdin io.Reader, stdout io.Writer, dial 
 
 		// Connected — reset backoff and announce.
 		attempt = 0
+		connNum++
 		fmt.Fprintln(os.Stderr, "mcp-proxy: connected")
-		logger.Debug("connected")
+		logger.Debug("connected", "connNum", connNum)
 
-		pending, err = runConnection(ctx, conn, lines, stdinDone, stdout, pending, cfg, logger)
+		isReconnect := connNum > 1
+		pending, err = runConnection(ctx, conn, lines, stdinDone, stdout, pending, cfg, logger, &hs, isReconnect)
 		conn.CloseNow()
 
 		if err == nil {
@@ -158,11 +164,14 @@ func runConnection(
 	pending []byte,
 	cfg Config,
 	logger *slog.Logger,
+	hs *handshake,
+	isReconnect bool,
 ) ([]byte, error) {
 	connCtx, connCancel := context.WithCancel(ctx)
 	defer connCancel()
 
 	readerDone := make(chan error, 1)
+	swallowCh := make(chan json.RawMessage, 1)
 
 	// Ping goroutine: periodic liveness check.
 	// Cancels connCtx if the daemon stops responding.
@@ -192,7 +201,7 @@ func runConnection(
 		}()
 	}
 
-	// Reader goroutine: daemon → stdout.
+	// Reader goroutine: daemon -> stdout.
 	// Only this goroutine writes to stdout — no mutex needed.
 	go func() {
 		defer connCancel() // signal writer to stop on disconnect
@@ -206,7 +215,28 @@ func runConnection(
 				readerDone <- fmt.Errorf("reading from daemon: %w", err)
 				return
 			}
-			logger.Debug("daemon→stdout", "size", len(msg))
+			logger.Debug("daemon->stdout", "size", len(msg))
+
+			// Check if we should swallow this response (replayed handshake).
+			select {
+			case swallowID := <-swallowCh:
+				var env struct {
+					ID json.RawMessage `json:"id"`
+				}
+				if json.Unmarshal(msg, &env) == nil && bytes.Equal(env.ID, swallowID) {
+					logger.Debug("swallowed replayed initialize response", "id", string(swallowID))
+					continue
+				}
+				// Not the one we're looking for — put the ID back.
+				// Non-blocking: if connCancel() fired between our pop and this
+				// put-back, a blocking send would deadlock (writer waits on
+				// readerDone, reader waits on swallowCh).
+				select {
+				case swallowCh <- swallowID:
+				default:
+				}
+			default:
+			}
 
 			_, writeErr := fmt.Fprintf(stdout, "%s\n", msg)
 			if writeErr != nil {
@@ -216,7 +246,38 @@ func runConnection(
 		}
 	}()
 
-	// Writer: channel → daemon. Runs in this goroutine.
+	// Replay handshake on reconnect, before retrying pending messages.
+	// Both frames are written without waiting for the daemon's initialize
+	// response in between. This is safe because MCP daemons (Python SDK)
+	// process inbound messages sequentially: initialize is fully handled
+	// before notifications/initialized is read from the WebSocket buffer.
+	if isReconnect && hs.cached() {
+		swallowCh <- hs.initID
+		if err := conn.Write(connCtx, websocket.MessageText, hs.initRequest); err != nil {
+			// Drain swallowCh so reader doesn't block.
+			select {
+			case <-swallowCh:
+			default:
+			}
+			connCancel()
+			<-readerDone
+			return pending, fmt.Errorf("writing replayed initialize: %w", err)
+		}
+		if hs.initialized != nil {
+			if err := conn.Write(connCtx, websocket.MessageText, hs.initialized); err != nil {
+				select {
+				case <-swallowCh:
+				default:
+				}
+				connCancel()
+				<-readerDone
+				return pending, fmt.Errorf("writing replayed initialized: %w", err)
+			}
+		}
+		logger.Debug("handshake replayed")
+	}
+
+	// Writer: channel -> daemon. Runs in this goroutine.
 	// First, retry any pending message from a previous failed write.
 	if pending != nil {
 		logger.Debug("retrying pending message", "size", len(pending))
@@ -225,6 +286,7 @@ func runConnection(
 			<-readerDone
 			return pending, fmt.Errorf("writing pending to daemon: %w", err)
 		}
+		hs.sniff(pending)
 		pending = nil
 	}
 
@@ -250,13 +312,15 @@ func runConnection(
 				}
 				return nil, nil
 			}
-			logger.Debug("stdin→daemon", "size", len(line))
+			logger.Debug("stdin->daemon", "size", len(line))
 			if err := conn.Write(connCtx, websocket.MessageText, line); err != nil {
 				// Write failed — this line is pending for retry.
 				connCancel()
 				<-readerDone
 				return line, fmt.Errorf("writing to daemon: %w", err)
 			}
+			// Sniff handshake frames so we can replay the latest on reconnect.
+			hs.sniff(line)
 
 		case <-connCtx.Done():
 			// Reader detected disconnect or parent context cancelled.
