@@ -99,6 +99,18 @@ func (d *MockDaemon) Received() [][]byte {
 	return out
 }
 
+// ReceivedSince returns a copy of messages received starting from index n.
+func (d *MockDaemon) ReceivedSince(n int) [][]byte {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if n >= len(d.received) {
+		return nil
+	}
+	out := make([][]byte, len(d.received)-n)
+	copy(out, d.received[n:])
+	return out
+}
+
 // Connected returns whether a client has connected.
 func (d *MockDaemon) Connected() bool {
 	d.mu.Lock()

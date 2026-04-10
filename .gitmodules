@@ -1,0 +1,3 @@
+[submodule ".punt-labs/ethos"]
+	path = .punt-labs/ethos
+	url = ../team

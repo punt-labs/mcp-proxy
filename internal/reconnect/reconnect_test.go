@@ -2,10 +2,12 @@ package reconnect_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -370,4 +372,381 @@ func TestPingTimeout_TriggersReconnect(t *testing.T) {
 	stdinW.Close()
 	err := <-done
 	assert.NoError(t, err)
+}
+
+// mcpHandler returns a MockDaemon handler that responds to MCP lifecycle
+// messages and echoes everything else. version is embedded in the
+// initialize response's serverInfo.
+func mcpHandler(version func() string) func([]byte) []byte {
+	return func(msg []byte) []byte {
+		var env struct {
+			Method string          `json:"method"`
+			ID     json.RawMessage `json:"id"`
+		}
+		if json.Unmarshal(msg, &env) != nil {
+			return msg // echo
+		}
+		switch env.Method {
+		case "initialize":
+			return []byte(fmt.Sprintf(
+				`{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-03-26","capabilities":{},"serverInfo":{"name":"mock","version":"%s"}}}`,
+				env.ID, version()))
+		case "notifications/initialized":
+			return nil // notification — no response
+		default:
+			return msg // echo
+		}
+	}
+}
+
+func TestReconnect_HandshakeReplay(t *testing.T) {
+	d := testutil.NewMockDaemon()
+	defer d.Close()
+	d.Handler = mcpHandler(func() string { return "1.0" })
+
+	stdinR, stdinW := io.Pipe()
+	stdout := &testutil.SafeBuffer{}
+	logger := debuglog.NewTestLogger(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- reconnect.Run(ctx, stdinR, stdout, dialMock(d), logger.Logger)
+	}()
+
+	require.True(t, waitForConnCount(d, 1, 2*time.Second))
+
+	// MCP handshake: initialize request → response on stdout.
+	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"initialize","id":0,"params":{}}`)
+	require.True(t, waitForLines(stdout, 1, 2*time.Second), "timed out waiting for initialize response")
+
+	// MCP handshake: notifications/initialized — produces no stdout output.
+	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+	time.Sleep(50 * time.Millisecond)
+
+	// Normal tool call on first connection.
+	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"tools/call","id":1}`)
+	require.True(t, waitForLines(stdout, 2, 2*time.Second), "timed out waiting for tools/call echo")
+
+	prevLen := len(d.Received())
+
+	// Force disconnect and wait for reconnect.
+	d.CloseConn()
+	require.True(t, waitForConnCount(d, 2, 5*time.Second), "timed out waiting for reconnect")
+
+	// Tool call on second connection.
+	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"tools/call","id":2}`)
+	require.True(t, waitForLines(stdout, 3, 2*time.Second), "timed out waiting for post-reconnect tools/call")
+
+	// Verify daemon received replayed handshake + the new tool call.
+	msgs := d.ReceivedSince(prevLen)
+	require.Len(t, msgs, 3, "expected initialize + initialized + tools/call after reconnect")
+	assert.Contains(t, string(msgs[0]), `"initialize"`)
+	assert.Contains(t, string(msgs[1]), `"notifications/initialized"`)
+	assert.Contains(t, string(msgs[2]), `"tools/call"`)
+
+	// Verify stdout: 3 lines total. Line 0 = initialize response, lines 1-2 = tools/call echoes.
+	// The replayed initialize response is swallowed — no duplicate.
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	require.Len(t, lines, 3)
+	assert.Contains(t, lines[0], `"serverInfo"`)
+	assert.Contains(t, lines[1], `"tools/call"`)
+	assert.Contains(t, lines[2], `"tools/call"`)
+
+	stdinW.Close()
+	runErr := <-done
+	assert.NoError(t, runErr)
+}
+
+func TestReconnect_SwallowsReplayedResponse(t *testing.T) {
+	d := testutil.NewMockDaemon()
+	defer d.Close()
+
+	var connN atomic.Int32
+	d.Handler = mcpHandler(func() string {
+		n := connN.Add(1)
+		return fmt.Sprintf("%d.0", n)
+	})
+
+	stdinR, stdinW := io.Pipe()
+	stdout := &testutil.SafeBuffer{}
+	logger := debuglog.NewTestLogger(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- reconnect.Run(ctx, stdinR, stdout, dialMock(d), logger.Logger)
+	}()
+
+	require.True(t, waitForConnCount(d, 1, 2*time.Second))
+
+	// MCP handshake.
+	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"initialize","id":0,"params":{}}`)
+	require.True(t, waitForLines(stdout, 1, 2*time.Second))
+	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+	time.Sleep(50 * time.Millisecond)
+
+	// Disconnect and reconnect — daemon will respond with version "2.0".
+	d.CloseConn()
+	require.True(t, waitForConnCount(d, 2, 5*time.Second))
+
+	// Send a tool call to confirm the connection works.
+	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"tools/call","id":1}`)
+	require.True(t, waitForLines(stdout, 2, 2*time.Second))
+
+	// stdout should contain server version "1.0" (original) but NOT "2.0" (replayed, swallowed).
+	out := stdout.String()
+	assert.Contains(t, out, `"version":"1.0"`, "original initialize response should be in stdout")
+	assert.NotContains(t, out, `"version":"2.0"`, "replayed initialize response should be swallowed")
+
+	stdinW.Close()
+	runErr := <-done
+	assert.NoError(t, runErr)
+}
+
+func TestReconnect_NoHandshakeCached(t *testing.T) {
+	d := testutil.NewMockDaemon()
+	defer d.Close()
+
+	stdinR, stdinW := io.Pipe()
+	stdout := &testutil.SafeBuffer{}
+	logger := debuglog.NewTestLogger(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- reconnect.Run(ctx, stdinR, stdout, dialMock(d), logger.Logger)
+	}()
+
+	require.True(t, waitForConnCount(d, 1, 2*time.Second))
+
+	// Send a plain ping — no initialize handshake.
+	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"ping","id":1}`)
+	require.True(t, waitForLines(stdout, 1, 2*time.Second))
+
+	// Disconnect and reconnect.
+	d.CloseConn()
+	require.True(t, waitForConnCount(d, 2, 5*time.Second))
+
+	// Send another ping on the new connection.
+	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"ping","id":2}`)
+	require.True(t, waitForLines(stdout, 2, 2*time.Second))
+
+	// Daemon should have received only the ping (id=2) after reconnect — no replayed handshake.
+	msgs := d.ReceivedSince(1)
+	require.Len(t, msgs, 1, "no handshake should be replayed when none was cached")
+	assert.Contains(t, string(msgs[0]), `"id":2`)
+
+	// stdout: 2 lines, both echoed pings.
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	require.Len(t, lines, 2)
+
+	stdinW.Close()
+	runErr := <-done
+	assert.NoError(t, runErr)
+}
+
+func TestReconnect_PreservesClientIDs(t *testing.T) {
+	d := testutil.NewMockDaemon()
+	defer d.Close()
+	d.Handler = mcpHandler(func() string { return "1.0" })
+
+	stdinR, stdinW := io.Pipe()
+	stdout := &testutil.SafeBuffer{}
+	logger := debuglog.NewTestLogger(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- reconnect.Run(ctx, stdinR, stdout, dialMock(d), logger.Logger)
+	}()
+
+	require.True(t, waitForConnCount(d, 1, 2*time.Second))
+
+	// MCP handshake + tool call.
+	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"initialize","id":0,"params":{}}`)
+	require.True(t, waitForLines(stdout, 1, 2*time.Second))
+	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+	time.Sleep(50 * time.Millisecond)
+	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"tools/call","id":1}`)
+	require.True(t, waitForLines(stdout, 2, 2*time.Second))
+
+	// Disconnect, reconnect, send another tool call.
+	d.CloseConn()
+	require.True(t, waitForConnCount(d, 2, 5*time.Second))
+	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"tools/call","id":2}`)
+	require.True(t, waitForLines(stdout, 3, 2*time.Second))
+
+	// Verify stdout lines preserve client IDs in order: 0, 1, 2.
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	require.Len(t, lines, 3)
+
+	expectedIDs := []json.RawMessage{
+		json.RawMessage(`0`),
+		json.RawMessage(`1`),
+		json.RawMessage(`2`),
+	}
+	for i, line := range lines {
+		var env struct {
+			ID json.RawMessage `json:"id"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(line), &env), "failed to parse stdout line %d", i)
+		assert.JSONEq(t, string(expectedIDs[i]), string(env.ID), "line %d id mismatch", i)
+	}
+
+	stdinW.Close()
+	runErr := <-done
+	assert.NoError(t, runErr)
+}
+
+func TestHandshake_SniffIgnoresNullID(t *testing.T) {
+	d := testutil.NewMockDaemon()
+	defer d.Close()
+	d.Handler = mcpHandler(func() string { return "1.0" })
+
+	stdinR, stdinW := io.Pipe()
+	stdout := &testutil.SafeBuffer{}
+	logger := debuglog.NewTestLogger(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- reconnect.Run(ctx, stdinR, stdout, dialMock(d), logger.Logger)
+	}()
+
+	require.True(t, waitForConnCount(d, 1, 2*time.Second))
+
+	// Send initialize with no "id" field — malformed JSON-RPC.
+	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"initialize","params":{}}`)
+	// The handler will try to respond, but with null id. Wait a beat for it.
+	time.Sleep(100 * time.Millisecond)
+
+	// Send a normal tool call to confirm the connection works.
+	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"tools/call","id":1}`)
+	require.True(t, waitForLines(stdout, 1, 2*time.Second), "timed out waiting for tools/call echo")
+
+	prevLen := len(d.Received())
+
+	// Force disconnect and wait for reconnect.
+	d.CloseConn()
+	require.True(t, waitForConnCount(d, 2, 5*time.Second), "timed out waiting for reconnect")
+
+	// Send another tool call on the new connection.
+	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"tools/call","id":2}`)
+	require.True(t, waitForLines(stdout, 2, 2*time.Second), "timed out waiting for post-reconnect tools/call")
+
+	// Verify daemon received only the new tool call — no replayed handshake.
+	msgs := d.ReceivedSince(prevLen)
+	require.Len(t, msgs, 1, "no handshake should be replayed when initialize had no id")
+	assert.Contains(t, string(msgs[0]), `"tools/call"`)
+
+	stdinW.Close()
+	runErr := <-done
+	assert.NoError(t, runErr)
+}
+
+func TestHandshake_SniffIgnoresExplicitNullID(t *testing.T) {
+	d := testutil.NewMockDaemon()
+	defer d.Close()
+	d.Handler = mcpHandler(func() string { return "1.0" })
+
+	stdinR, stdinW := io.Pipe()
+	stdout := &testutil.SafeBuffer{}
+	logger := debuglog.NewTestLogger(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- reconnect.Run(ctx, stdinR, stdout, dialMock(d), logger.Logger)
+	}()
+
+	require.True(t, waitForConnCount(d, 1, 2*time.Second))
+
+	// Send initialize with explicit "id":null — also malformed.
+	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"initialize","id":null,"params":{}}`)
+	time.Sleep(100 * time.Millisecond)
+
+	// Normal tool call.
+	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"tools/call","id":1}`)
+	require.True(t, waitForLines(stdout, 1, 2*time.Second))
+
+	prevLen := len(d.Received())
+
+	// Disconnect and reconnect.
+	d.CloseConn()
+	require.True(t, waitForConnCount(d, 2, 5*time.Second))
+
+	// Tool call on new connection.
+	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"tools/call","id":2}`)
+	require.True(t, waitForLines(stdout, 2, 2*time.Second))
+
+	// No replayed handshake.
+	msgs := d.ReceivedSince(prevLen)
+	require.Len(t, msgs, 1, "no handshake should be replayed when initialize had null id")
+	assert.Contains(t, string(msgs[0]), `"tools/call"`)
+
+	stdinW.Close()
+	runErr := <-done
+	assert.NoError(t, runErr)
+}
+
+func TestMultipleReconnects_HandshakeReplay(t *testing.T) {
+	d := testutil.NewMockDaemon()
+	defer d.Close()
+	d.Handler = mcpHandler(func() string { return "1.0" })
+
+	stdinR, stdinW := io.Pipe()
+	stdout := &testutil.SafeBuffer{}
+	logger := debuglog.NewTestLogger(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- reconnect.Run(ctx, stdinR, stdout, dialMock(d), logger.Logger)
+	}()
+
+	require.True(t, waitForConnCount(d, 1, 2*time.Second))
+
+	// MCP handshake on first connection.
+	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"initialize","id":0,"params":{}}`)
+	require.True(t, waitForLines(stdout, 1, 2*time.Second))
+	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+	time.Sleep(50 * time.Millisecond)
+
+	// 3 reconnect cycles, each with a tools/call.
+	for i := range 3 {
+		d.CloseConn()
+		require.True(t, waitForConnCount(d, i+2, 5*time.Second), "timed out waiting for reconnect %d", i+1)
+
+		msg := fmt.Sprintf(`{"jsonrpc":"2.0","method":"tools/call","id":%d}`, i+1)
+		fmt.Fprintln(stdinW, msg)
+		require.True(t, waitForLines(stdout, i+2, 2*time.Second), "timed out waiting for tools/call response on reconnect %d", i+1)
+	}
+
+	// stdout: 1 initialize response + 3 tools/call echoes = 4 lines.
+	// No duplicate initialize responses from any of the 3 replays.
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	require.Len(t, lines, 4, "expected 1 initialize response + 3 tools/call echoes")
+	assert.Contains(t, lines[0], `"serverInfo"`)
+	for i := 1; i <= 3; i++ {
+		assert.Contains(t, lines[i], `"tools/call"`, "line %d should be a tools/call echo", i)
+	}
+
+	stdinW.Close()
+	runErr := <-done
+	assert.NoError(t, runErr)
 }
