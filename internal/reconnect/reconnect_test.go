@@ -627,13 +627,13 @@ func TestHandshake_SniffIgnoresNullID(t *testing.T) {
 	require.True(t, waitForConnCount(d, 1, 2*time.Second))
 
 	// Send initialize with no "id" field — malformed JSON-RPC.
+	// The handler still responds (with a mangled id), producing a stdout line.
 	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"initialize","params":{}}`)
-	// The handler will try to respond, but with null id. Wait a beat for it.
-	time.Sleep(100 * time.Millisecond)
+	require.True(t, waitForLines(stdout, 1, 2*time.Second), "timed out waiting for init response")
 
 	// Send a normal tool call to confirm the connection works.
 	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"tools/call","id":1}`)
-	require.True(t, waitForLines(stdout, 1, 2*time.Second), "timed out waiting for tools/call echo")
+	require.True(t, waitForLines(stdout, 2, 2*time.Second), "timed out waiting for tools/call echo")
 
 	prevLen := len(d.Received())
 
@@ -643,7 +643,7 @@ func TestHandshake_SniffIgnoresNullID(t *testing.T) {
 
 	// Send another tool call on the new connection.
 	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"tools/call","id":2}`)
-	require.True(t, waitForLines(stdout, 2, 2*time.Second), "timed out waiting for post-reconnect tools/call")
+	require.True(t, waitForLines(stdout, 3, 2*time.Second), "timed out waiting for post-reconnect tools/call")
 
 	// Verify daemon received only the new tool call — no replayed handshake.
 	msgs := d.ReceivedSince(prevLen)
@@ -675,12 +675,13 @@ func TestHandshake_SniffIgnoresExplicitNullID(t *testing.T) {
 	require.True(t, waitForConnCount(d, 1, 2*time.Second))
 
 	// Send initialize with explicit "id":null — also malformed.
+	// The handler responds with "id":null, producing a stdout line.
 	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"initialize","id":null,"params":{}}`)
-	time.Sleep(100 * time.Millisecond)
+	require.True(t, waitForLines(stdout, 1, 2*time.Second), "timed out waiting for init response")
 
 	// Normal tool call.
 	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"tools/call","id":1}`)
-	require.True(t, waitForLines(stdout, 1, 2*time.Second))
+	require.True(t, waitForLines(stdout, 2, 2*time.Second), "timed out waiting for tools/call echo")
 
 	prevLen := len(d.Received())
 
@@ -690,7 +691,7 @@ func TestHandshake_SniffIgnoresExplicitNullID(t *testing.T) {
 
 	// Tool call on new connection.
 	fmt.Fprintln(stdinW, `{"jsonrpc":"2.0","method":"tools/call","id":2}`)
-	require.True(t, waitForLines(stdout, 2, 2*time.Second))
+	require.True(t, waitForLines(stdout, 3, 2*time.Second))
 
 	// No replayed handshake.
 	msgs := d.ReceivedSince(prevLen)
