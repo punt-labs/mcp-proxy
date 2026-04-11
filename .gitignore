@@ -19,7 +19,6 @@ coverage.out
 
 # Local-only
 .claude/
-.vox/
 
 # Z tooling
 docs/fuzz.sty
