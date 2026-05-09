@@ -31,4 +31,11 @@ docs/*.fuzz
 docs/*.toc
 docs/*.out
 docs/*.pdf
-.envrc.local
+
+# Local-only files (machine-specific, per-user)
+*.local
+*.local.*
+
+# Vox cached audio
+.vox/*.mp3
+docs/.vox/
