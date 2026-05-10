@@ -60,6 +60,25 @@ The proxy is transparent — it doesn't know what MCP tools exist. JSON-RPC mess
 - **No panics in library code.** Panics are reserved for programmer bugs (unreachable cases in exhaustive switches), never for runtime conditions.
 - **`internal/` for everything.** Nothing is exported outside the module. The public API is the binary, not Go packages.
 
+## Ethos & Delegation
+
+Identity: `agent: claude` per `.punt-labs/ethos.yaml`. Sub-agent calls (`Agent(subagent_type=…)`) match ethos identity handles.
+
+mcp-proxy is a Go static binary that sits on the trust boundary between Claude Code and shared daemons. Three concerns dominate: byte-for-byte transparent forwarding, session-identity injection, and zero-dependency build hygiene. Within each row, the worker and evaluator must be distinct handles. Claude is the leader, never the evaluator.
+
+| Task type | Worker | Evaluator |
+|-----------|--------|-----------|
+| Bridge / transport / stdio↔WS forwarding | `bwk` (Kernighan) | `rop` (Pike) |
+| Reconnect, backoff, signal handling | `bwk` | `rop` |
+| Session-key resolution / process-tree walking | `bwk` | `djb` (Bernstein) |
+| Auth / bearer token / WS upgrade trust path | `djb` | `bwk` |
+| CLI flag surface / hook relay UX | `mdm` | `rop` |
+| Cross-platform build matrix / static binary release | `adb` (Lovelace) | `bwk` |
+| Race-condition / concurrency review (`-race`) | `bwk` | `djb` |
+| Integration with daemon endpoints (biff, lux, quarry) | `bwk` | owning daemon's worker (e.g. `rmh` for lux/quarry, `mdm` for biff) |
+
+Note: `bwk` (Kernighan) covers Go implementation; `rop` (Pike) and `mdm` (McIlroy) cover CLI/Unix surface and pipe correctness. For pure-Go internals, prefer `bwk` worker / `rop` evaluator. Use the `quick` pipeline for surgical bridge fixes; `standard` for any change touching the wire format or session-identity contract.
+
 ## Quality Gates
 
 Run before every commit:
