@@ -39,3 +39,6 @@ docs/*.pdf
 # Vox cached audio
 .vox/*.mp3
 docs/.vox/
+
+# Quarry session-transcript captures (pkit-kcps)
+.punt-labs/quarry/captures/
