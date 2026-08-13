@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `.gitignore` no longer excludes `.claude/settings.json`. The bare `.claude/`
+  directory rule excluded it outright, and git cannot re-include a file whose
+  parent directory is excluded — so the committed permission config survived in
+  version control only because it predated the rule. Adopted the pattern from
+  biff: `.claude/*` (a file glob, anchored to the repo root, leaving the
+  negation live), `!.claude/settings.json`, and `*/**/.claude/` to restore the
+  any-depth coverage the bare rule provided. (pkit-rc97)
+
 - Removed two dead `Write(path)` deny rules (`Write(.env)`, `Write(.envrc)`) from
   `.claude/settings.json`. Claude Code matches path-scoped rules under
   `Edit(path)` only — that one form covers Write, Edit, and NotebookEdit — so a
