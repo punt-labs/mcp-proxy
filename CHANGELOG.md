@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Removed two dead `Write(path)` deny rules (`Write(.env)`, `Write(.envrc)`) from
+  `.claude/settings.json`. Claude Code matches path-scoped rules under
+  `Edit(path)` only — that one form covers Write, Edit, and NotebookEdit — so a
+  `Write(path)` rule matched nothing and printed a startup warning every session.
+  Enforcement is unchanged: `Edit(.env)` and `Edit(.envrc)` remain and are what
+  actually blocks writes to those files. (mcp-ptd)
+
 ## [0.4.1] - 2026-04-09
 
 ### Fixed
