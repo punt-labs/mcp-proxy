@@ -124,9 +124,7 @@
       "Bash(telnet:*)",
       "Bash(socat:*)",
       "Edit(.env)",
-      "Write(.env)",
       "Edit(.envrc)",
-      "Write(.envrc)",
       "Bash(direnv allow:*)"
     ]
   }
