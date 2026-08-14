@@ -1,3 +1,163 @@
+# === Punt Labs canonical .gitignore ===
+# Source of truth: .bin/gitignore-canonical.template
+# Rollout:         .bin/gitignore-canonical-rollout.sh
+# Repo-specific additions belong BELOW the "# === Repo-specific ===" marker.
+# Everything above it is managed by the rollout script.
+
+# --- Secrets & local overrides ---
+.env
+.env.*
+.env*.local
+!.env.example
+.envrc.local
+.biff.local
+.claude/settings.local.json
+.claude/settings.local.*
+.claude/mcp.local.json
+.mcp.local.json
+*.local
+*.local.*
+.*.local
+.*.local.*
+
+# --- Punt Labs runtime state (never commit) ---
+.punt-labs/local/
+.punt-labs/**/local/**
+.punt-labs/**/*.local.*
+.punt-labs/quarry/captures/
+.punt-labs/vox/ephemeral/
+.punt-labs/vox/vox.local.md
+.punt-labs/lux.md
+
+# --- Claude Code runtime state ---
+.claude/*
+!.claude/settings.json
+!.claude/commands/
+!.claude/hooks/
+!.claude/agents/
+!.claude/rules/
+!.claude/skills/
+.claude/scheduled_tasks*
+.claude/worktrees/
+.claude/projects/
+.claude/beadle.poll.*
+*/**/.claude/
+
+# --- Lock files (except uv.lock) ---
+.*.lock
+*.punt-import.lock
+.CLAUDE.md.lock
+.CLAUDE.md.punt-import.lock
+**/.create.lock
+
+# --- Beads runtime state ---
+.beads/bd.sock*
+.beads/beads.db*
+.beads/daemon-*
+.beads/daemon.log
+.beads/daemon-error
+.beads/.local_version
+
+# --- Scratch / temp ---
+.tmp/*
+!.tmp/.gitkeep
+*.tmp
+CLAUDE.md.tmp
+
+# --- Worktrees ---
+.worktrees/
+
+# --- OS junk ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+
+# --- Editors / IDEs ---
+.idea/
+.vscode/
+.cursor/
+.codex/
+.accio/
+.claude-flow/
+*.swp
+*.swo
+*~
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+dist/
+build/
+*.egg
+*.egg-info/
+.eggs/
+.mypy_cache/
+.pyright/
+.pytest_cache/
+.pytest-work/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+uv.toml
+
+# --- Node / web ---
+node_modules/
+.astro/
+.vercel/
+
+# --- Go ---
+coverage.out
+*.test
+
+# --- Swift / Xcode ---
+# (Do NOT ignore *.xcodeproj / *.xcworkspace — those directories are tracked;
+# only ignore user-specific state INSIDE them.)
+xcuserdata/
+DerivedData/
+CoverageDerived/
+*.xccheckout
+*.xcresult
+*.xcscmblueprint
+*.hmap
+*.dSYM
+*.dSYM.zip
+*.ipa
+.swiftpm/
+Package.pin
+Package.resolved
+Carthage/Build/
+Carthage/Checkout
+Pods/
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+iOSInjectionProject/
+playground.xcworkspace
+timeline.xctimeline
+
+# --- LaTeX build artifacts ---
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.run.xml
+*.synctex.gz
+*.toc
+
+# === Repo-specific ===
 # Binary
 mcp-proxy
 dist/
@@ -15,7 +175,6 @@ coverage.out
 *.swo
 
 # Temp
-.tmp/
 
 # Claude Code (settings.json is tracked; everything else is local/runtime).
 # Use `.claude/*`, not `.claude/`: git cannot re-include a file whose parent
@@ -24,8 +183,6 @@ coverage.out
 # the root one where bare `.claude/` covered every depth; `*/**/.claude/`
 # restores that. Nested .claude dirs hold settings.local.json, which carries
 # machine-local MCP config and absolute-path allow rules — never commit it.
-.claude/*
-!.claude/settings.json
 */**/.claude/
 
 # Z tooling
@@ -41,15 +198,12 @@ docs/*.out
 docs/*.pdf
 
 # Local-only files (machine-specific, per-user)
-*.local
-*.local.*
 
 # Vox cached audio
 .vox/*.mp3
 docs/.vox/
 
 # Quarry session-transcript captures (pkit-kcps)
-.punt-labs/quarry/captures/
 
 # The mandated sibling lock every punt CLI takes before mutating a shared
 # host file (tool-enable-disable.md 2.4). Per-machine runtime state, and it
