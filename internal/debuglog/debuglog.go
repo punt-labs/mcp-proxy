@@ -35,7 +35,9 @@ func FromEnv() (*slog.Logger, io.Closer) {
 		path = val
 	}
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	// 0o600: debug logs can contain session identifiers, auth headers,
+	// and MCP payloads. Restrict to owner-only.
+	f, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mcp-proxy: warning: cannot open debug log %q: %v\n", path, err)
 		return Nop(), io.NopCloser(nil)
