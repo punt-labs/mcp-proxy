@@ -287,7 +287,6 @@ func runConnection(
 			return pending, fmt.Errorf("writing pending to daemon: %w", err)
 		}
 		hs.sniff(pending)
-		pending = nil
 	}
 
 	for {
