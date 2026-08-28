@@ -6,7 +6,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/punt-labs/mcp-proxy/test.yml?label=CI)](https://github.com/punt-labs/mcp-proxy/actions/workflows/test.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/punt-labs/mcp-proxy.svg)](https://pkg.go.dev/github.com/punt-labs/mcp-proxy)
 
-Claude Code spawns a fresh MCP server process per session, which duplicates any shared state — ML models, connection pools, singleton devices — across every open tab. `mcp-proxy` is a Go binary that Claude Code spawns instead of the real MCP server; it forwards MCP JSON-RPC over WebSocket to a single shared daemon and never inspects message content. Any MCP server that exposes a WebSocket endpoint speaking MCP works with it, unchanged.
+`mcp-proxy` is a Go binary that Claude Code spawns instead of an MCP server process. It forwards MCP JSON-RPC over WebSocket to a single shared daemon and never inspects message content — any MCP server that exposes a WebSocket endpoint speaking MCP works with it, unchanged.
 
 **Platforms:** macOS, Linux
 
@@ -15,6 +15,14 @@ Claude Code spawns a fresh MCP server process per session, which duplicates any 
 Claude Code ◄──────────────► mcp-proxy ◄──────────────────────► daemon
              MCP JSON-RPC                                       (one process)
 ```
+
+## Why
+
+Ranked by how often it drives a project to reach for the proxy:
+
+1. **Cardinality.** Many Claude Code sessions, one MCP server process. Shared state — ML models, connection pools, singleton devices, audio queues — loads once for the daemon instead of once per tab. On systems with several open Claude Code sessions this is the difference between an MCP server that fits in memory and one that doesn't.
+2. **Reconnect logic.** When the daemon disconnects (crash, restart, network blip, transient hang), the proxy reconnects with exponential backoff and preserves in-flight stdin messages across the outage. A ping/pong keepalive detects silent hangs — connections whose TCP stays open but where the daemon has stopped processing — and tears them down so reconnect can proceed. Daemon failures do not cascade into Claude Code session failures.
+3. **Upgrade without restart** — mostly a plugin-developer story. When the daemon is upgraded (redeploy, `brew upgrade`, `systemctl restart`, or a `go install` during a dev inner loop), the proxy reconnects transparently and replays the MCP `initialize` handshake so the fresh daemon inherits the client's negotiated session state. You do not restart Claude Code to pick up a new MCP server version. End users benefit from this on daemon upgrades and daemon crashes, but it matters most while you're actively iterating on an MCP server.
 
 ## Quick Start
 
