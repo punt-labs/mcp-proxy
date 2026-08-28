@@ -45,5 +45,8 @@ beads.right.meta.json
 daemon.lock
 daemon.log
 daemon.pid
+daemon-error
+dolt/
+dolt-server.*
 bd.sock
 sync-state.json
