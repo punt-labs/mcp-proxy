@@ -293,7 +293,7 @@ This is the standard Go pattern — `kubectl`, `docker`, and most Go CLI tools u
 
 ### Quarry (`quarry serve`) — easiest migration
 
-`quarry serve` (stdlib HTTP) already exists. Each `quarry mcp` session currently loads its own LanceDB index and ONNX embedding model (~200MB). The daemon shares one index and one model across all sessions.
+`quarry serve` (stdlib HTTP) already exists. Each `quarry mcp` session currently loads its own LanceDB index and ONNX embedding model. The daemon shares one index and one model across all sessions.
 
 **Complications:**
 
@@ -433,16 +433,7 @@ Claude Code hooks are shell scripts with brutal latency budgets:
 | `Notification` | unlimited | Async |
 | `SessionEnd` | unlimited | Async |
 
-Python import tax makes these budgets impossible to meet through normal CLI invocation:
-
-| Entry point | Import time |
-|-------------|------------|
-| `biff` (full CLI) | ~3.7s |
-| `biff-hook` (stdlib-only) | ~0.3s |
-| `quarry` (full CLI) | ~1.5s |
-| `mcp-proxy` (Go binary) | < 10ms |
-
-Each Python project independently solves this with lightweight entry points, parallel import trees, and stdlib-only handlers — duplicated effort that's still too slow for the 100ms budget.
+Python import tax makes these budgets impossible to meet through normal CLI invocation: the daemon-owning full CLIs (biff, quarry) take seconds to import before their first line of user code runs. Even lightweight stdlib-only entry points still miss the 100ms budget by an order of magnitude. A static Go binary that opens one WebSocket connection is the right shape for hook-latency work.
 
 ### Design
 
@@ -557,7 +548,7 @@ Async hooks must not use `CloseNow()` after sending. A TCP RST can race the noti
 3. Wait for the daemon's Close echo (RFC 6455 §7.1.2)
 4. Exit
 
-This adds ~1ms on localhost — not a meaningful budget hit, and guarantees the notification is delivered.
+The extra half-round-trip is negligible against hook budgets, and guarantees the notification is delivered.
 
 ### Connection Failure — Fail Fast
 
@@ -577,14 +568,14 @@ Hook connections set `conn.SetReadLimit(1024 * 1024)` (1MB), matching the MCP br
 
 ### What This Replaces
 
-Each daemon project currently maintains its own hook latency solution:
+Each daemon project currently maintains its own hook-latency workaround:
 
 | Project | Current approach | With hook relay |
 |---------|-----------------|----------------|
-| biff | `biff-hook` entry point, `_stdlib` modules, ~0.3s | `mcp-proxy --hook`, ~15ms |
-| quarry | Full CLI import, ~1.5s (hooks not yet implemented) | `mcp-proxy --hook`, ~15ms |
-| vox | Shell-only hooks, ~0.1s (limited capability) | `mcp-proxy --hook`, ~15ms (full daemon access) |
-| lux | Full CLI import (hooks not yet implemented) | `mcp-proxy --hook`, ~15ms |
+| biff | `biff-hook` entry point, `_stdlib` modules | `mcp-proxy --hook`, well under the sync-hook budget |
+| quarry | Full CLI import (hooks not yet implemented) | `mcp-proxy --hook`, same |
+| vox | Shell-only hooks, limited capability | `mcp-proxy --hook`, same, full daemon access |
+| lux | Full CLI import (hooks not yet implemented) | `mcp-proxy --hook`, same |
 
 ### What This Does NOT Replace
 
@@ -598,11 +589,11 @@ Using the MCP endpoint for hooks would require either faking the MCP `initialize
 
 ### Rejected: Separate HTTP Endpoint
 
-Adds a second transport (HTTP vs WebSocket) to the daemon. WebSocket is already proven, authed, and fast enough for one-shot calls (~5ms upgrade on localhost).
+Adds a second transport (HTTP vs WebSocket) to the daemon. WebSocket is already proven, authed, and fast enough for one-shot calls.
 
 ### Rejected: Persistent Hook Connection
 
-A long-running hook relay (single WebSocket connection reused across hook invocations) would save the per-call upgrade handshake (~5ms). But it requires a background process or Unix socket to multiplex hook calls — significantly more complexity for a 5ms saving. One-shot calls are simple, stateless, and fast enough.
+A long-running hook relay (single WebSocket connection reused across hook invocations) would save the per-call upgrade handshake. But it requires a background process or Unix socket to multiplex hook calls — significantly more complexity for a small per-call saving. One-shot calls are simple, stateless, and fast enough.
 
 ### Rejected: Separate Binary (`cli-proxy`)
 
@@ -620,7 +611,7 @@ The `internal/bridge` and `internal/reconnect` packages are unchanged — hook m
 
 ### Scalability
 
-At Claude Code hook firing rates — typically 1–10 events per minute per session, 5–20 sessions — hook relay produces 10–200 one-shot WebSocket connections per minute. This is trivial for any daemon that can handle a persistent MCP connection. One-shot connections are correct here.
+Hook events fire at CLI-command frequency, not high-throughput rates. Under realistic Claude Code usage the aggregate connect rate stays well within what any daemon that can serve a persistent MCP connection can handle. One-shot connections are correct here.
 
 ---
 
@@ -746,7 +737,7 @@ With `CGO_ENABLED=0`, Go uses its pure-Go DNS resolver and avoids all C library 
 
 ### Binary Size
 
-~6MB stripped (darwin/arm64). Acceptable for a proxy that runs as a persistent child process.
+`-ldflags="-s -w"` strips symbols; the release binary stays a small, single-file static executable acceptable for a proxy that runs as a persistent child process. The exact size drifts with Go toolchain and dependency updates and is not pinned in this document.
 
 ---
 
@@ -779,9 +770,10 @@ Stripping and re-adding works but is fragile if the daemon's hook endpoint ever 
 ## DES-016: MCP Handshake Replay on Reconnect
 
 **Date:** 2026-04-09
-**Status:** PROPOSED
+**Status:** SETTLED
 **Topic:** Replaying `initialize` / `notifications/initialized` after daemon reconnect
-**Bead:** mcp-lo3
+**Bead:** mcp-lo3 (closed)
+**Implementation:** `internal/reconnect/handshake.go`
 **Downstream:** quarry-mddj
 
 ### Problem
