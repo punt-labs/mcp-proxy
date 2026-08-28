@@ -4,7 +4,7 @@ Systems design in Go and Python. Correctness over speed.
 
 ## Go
 
-- Go 1.26+, internal/ for everything, no interface{}/any unless unavoidable
+- Go 1.25+, internal/ for everything, no interface{}/any unless unavoidable
 - Table-driven tests with testify/assert and testify/require
 - Errors are values — wrap with fmt.Errorf("context: %w", err)
 - No panics in library code
