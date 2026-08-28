@@ -26,9 +26,9 @@ func TestWalkToTopmostClaude_DirectParent(t *testing.T) {
 	myPid := 100
 	claudePid := 200
 	table := map[int]processEntry{
-		myPid:    {ppid: claudePid, comm: "mcp-proxy"},
+		myPid:     {ppid: claudePid, comm: "mcp-proxy"},
 		claudePid: {ppid: 500, comm: "claude"},
-		500:      {ppid: 1, comm: "/sbin/launchd"},
+		500:       {ppid: 1, comm: "/sbin/launchd"},
 	}
 	result := walkToTopmostClaude(myPid, mockTable(table))
 	assert.Equal(t, claudePid, result)
@@ -54,9 +54,9 @@ func TestWalkToTopmostClaude_SingleClaudeWithShell(t *testing.T) {
 	claudePid := 200
 	shellPid := 300
 	table := map[int]processEntry{
-		myPid:    {ppid: claudePid, comm: "mcp-proxy"},
+		myPid:     {ppid: claudePid, comm: "mcp-proxy"},
 		claudePid: {ppid: shellPid, comm: "claude"},
-		shellPid: {ppid: 1, comm: "-zsh"},
+		shellPid:  {ppid: 1, comm: "-zsh"},
 	}
 	result := walkToTopmostClaude(myPid, mockTable(table))
 	assert.Equal(t, claudePid, result)
@@ -66,9 +66,9 @@ func TestWalkToTopmostClaude_MacOSFullPath(t *testing.T) {
 	myPid := 100
 	claudePid := 200
 	table := map[int]processEntry{
-		myPid:    {ppid: claudePid, comm: "mcp-proxy"},
+		myPid:     {ppid: claudePid, comm: "mcp-proxy"},
 		claudePid: {ppid: 500, comm: "/Applications/Claude.app/Contents/MacOS/claude"},
-		500:      {ppid: 1, comm: "/sbin/launchd"},
+		500:       {ppid: 1, comm: "/sbin/launchd"},
 	}
 	result := walkToTopmostClaude(myPid, mockTable(table))
 	assert.Equal(t, claudePid, result)

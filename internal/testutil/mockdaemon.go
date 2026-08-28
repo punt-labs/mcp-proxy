@@ -29,12 +29,12 @@ type MockDaemon struct {
 	authHeader     string
 	upgradeHeaders http.Header
 	received       [][]byte
-	connected    bool
-	disconnected bool
-	conn         *websocket.Conn
-	connCount    int
-	acceptErr    error
-	pushErr      error
+	connected      bool
+	disconnected   bool
+	conn           *websocket.Conn
+	connCount      int
+	acceptErr      error
+	pushErr        error
 }
 
 // NewMockDaemon creates and starts a mock daemon server.

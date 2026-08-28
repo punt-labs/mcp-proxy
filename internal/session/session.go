@@ -11,8 +11,8 @@ import (
 )
 
 var (
-	cachedKey  int
-	cacheOnce  sync.Once
+	cachedKey int
+	cacheOnce sync.Once
 )
 
 // FindSessionKey returns the PID of the topmost claude ancestor process.
