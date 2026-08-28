@@ -203,9 +203,7 @@ func runHealthCheck(rawURL string, extraHeaders map[string]string, caCert string
 		fmt.Fprintf(os.Stderr, "mcp-proxy: health check failed: %v\n", err)
 		return 1
 	}
-	if closeErr := conn.CloseNow(); closeErr != nil {
-		logger.Debug("closing health check connection", "error", closeErr)
-	}
+	_ = conn.CloseNow() // process is about to exit; nothing to recover from
 	fmt.Fprintln(os.Stderr, "mcp-proxy: ok")
 	return 0
 }
@@ -277,11 +275,7 @@ func runHook(rawURL string, event string, async bool, extraHeaders map[string]st
 		fmt.Fprintf(os.Stderr, "mcp-proxy: %v\n", err)
 		return 1
 	}
-	defer func() {
-		if err := conn.CloseNow(); err != nil {
-			logger.Debug("closing hook connection", "error", err)
-		}
-	}()
+	defer func() { _ = conn.CloseNow() }() // process is about to exit
 
 	conn.SetReadLimit(1024 * 1024) // 1MB
 
