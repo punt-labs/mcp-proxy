@@ -14,7 +14,7 @@
 
 \title{mcp-proxy: A Z Specification}
 \author{Formal Model of a Bidirectional MCP Proxy}
-\date{March 2026}
+\date{}
 \hypersetup{
   pdftitle={mcp-proxy: A Z Specification},
   pdfauthor={Punt Labs},
@@ -36,16 +36,33 @@ parsing, no routing, no transformation.  Two concurrent channels carry
 messages in each direction (stdin$\to$daemon, daemon$\to$stdout), with
 coordinated shutdown on stdin EOF or daemon disconnect.
 
-This specification models three aspects of the proxy:
+This specification models four aspects of the proxy:
 
 \begin{enumerate}
   \item The \textbf{proxy lifecycle}: startup, connection, bridging, and
     shutdown phases.
   \item The \textbf{bridge}: bidirectional message forwarding with ordering
-    guarantees and shutdown coordination.
+    guarantees and shutdown coordination on a single WebSocket connection.
+  \item The \textbf{keepalive}: WebSocket ping/pong liveness detection that
+    tears down a stalled connection.
   \item The \textbf{session key resolver}: process tree walking to find the
     topmost \texttt{claude} ancestor.
 \end{enumerate}
+
+\paragraph{Scope.}  This document is a \emph{per-connection} model.  The
+\texttt{internal/bridge} package it corresponds to is used unchanged by the
+higher-level \texttt{internal/reconnect} coordinator, which loops over
+connections with exponential backoff and preserves in-flight messages
+across reconnects; by \texttt{internal/hook}, which performs one-shot
+JSON-RPC calls to a dedicated \texttt{/hook} endpoint; and by the
+\texttt{--health} entry point, which dials and closes without exchanging
+any bridge messages.  On reconnect, the coordinator replays the cached
+\texttt{initialize} request and \texttt{notifications/initialized}
+notification so the newly-connected daemon inherits the client's MCP
+session state.  These four composition layers---reconnect, keepalive
+recovery, hook relay, and handshake replay---are described in
+\texttt{DESIGN.md} (DES-009, DES-010, DES-011, DES-013, DES-016) and are
+outside the scope of this Z model.
 
 % ───────────────────────────────────────────────────────────────────
 \section{Basic Types}
