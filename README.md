@@ -62,15 +62,15 @@ Then point Claude Code at the proxy instead of the direct MCP server:
 
 ## Commands
 
-The binary has three modes, selected by flags. The daemon URL is always the first positional argument.
+The binary has three modes, selected by flags. The daemon URL is supplied either as a positional argument or via `--config <profile>` (see [Configuration](#configuration)); a positional URL wins over the config's URL. In hook mode the URL and the `--hook <event>` flag can appear in either order.
 
 | Invocation | What it does |
 |------------|--------------|
 | `mcp-proxy <url>` | Proxy mode. Reads JSON-RPC from stdin, forwards each line as a WebSocket text frame to the daemon, writes daemon responses (and server-initiated messages) to stdout. Reconnects on daemon disconnect. |
-| `mcp-proxy --health <url>` | Health check. Dials the daemon, closes immediately. Exits `0` on success, `1` on failure. Prints `mcp-proxy: ok` or a diagnostic to stderr. |
-| `mcp-proxy --hook <event> <url>` | Hook relay. Reads stdin, wraps it as `params` in a JSON-RPC request with method `hook/<event>`, and sends it to the daemon's `/hook` endpoint. Waits for the response and writes it to stdout. |
-| `mcp-proxy --hook --async <event> <url>` | Async hook relay. Same as above but sent as a notification (no `id`), and the proxy performs a graceful WebSocket close to guarantee delivery. |
-| `mcp-proxy --config <profile> [url]` | Read connection details from `~/.punt-labs/mcp-proxy/<profile>.toml`. See [Configuration](#configuration). |
+| `mcp-proxy --health [<url>]` | Health check. Dials the daemon, closes immediately. Exits `0` on success, `1` on failure. Prints `mcp-proxy: ok` or a diagnostic to stderr. |
+| `mcp-proxy [<url>] --hook <event>` | Hook relay. Reads stdin, wraps it as `params` in a JSON-RPC request with method `hook/<event>`, and sends it to the daemon's `/hook` endpoint. Waits for the response and writes it to stdout. |
+| `mcp-proxy [<url>] --hook --async <event>` | Async hook relay. Same as above but sent as a notification (no `id`), and the proxy performs a graceful WebSocket close to guarantee delivery. |
+| `mcp-proxy --config <profile> [<url>]` | Read connection details (URL and headers) from `~/.punt-labs/mcp-proxy/<profile>.toml`. Combines with any of the modes above. |
 
 Messages are opaque bytes end-to-end — the proxy never parses JSON.
 
