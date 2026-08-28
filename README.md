@@ -6,7 +6,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/punt-labs/mcp-proxy/test.yml?label=CI)](https://github.com/punt-labs/mcp-proxy/actions/workflows/test.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/punt-labs/mcp-proxy.svg)](https://pkg.go.dev/github.com/punt-labs/mcp-proxy)
 
-`mcp-proxy` is a Go binary that Claude Code spawns instead of an MCP server process. It forwards MCP JSON-RPC over WebSocket to a single shared daemon and never inspects message content — any MCP server that exposes a WebSocket endpoint speaking MCP works with it, unchanged.
+`mcp-proxy` is a Go binary that Claude Code spawns instead of an MCP server process. It forwards MCP JSON-RPC over WebSocket to a single shared daemon. Any MCP server that exposes a WebSocket endpoint speaking MCP works with it, unchanged — payload bytes are treated opaquely; the proxy inspects only the JSON-RPC envelope needed to replay the MCP `initialize` handshake on reconnect and to route hook responses.
 
 **Platforms:** macOS, Linux
 
@@ -80,7 +80,7 @@ The binary has three modes, selected by flags. The daemon URL is supplied either
 | `mcp-proxy [<url>] --hook --async <event>` | Async hook relay. Same as above but sent as a notification (no `id`), and the proxy performs a graceful WebSocket close to guarantee delivery. |
 | `mcp-proxy --config <profile> [<url>]` | Read connection details (URL and headers) from `~/.punt-labs/mcp-proxy/<profile>.toml`. Combines with any of the modes above. |
 
-Messages are opaque bytes end-to-end — the proxy never parses JSON.
+In proxy mode, messages flow through as opaque bytes end-to-end. Two narrow exceptions: on reconnect, the proxy replays the cached MCP `initialize` request and `notifications/initialized` notification (it inspects `method` and `id` on outgoing frames to cache them, but never touches `params`); in `--hook` mode, it validates that stdin is well-formed JSON, wraps it as the `params` field of a JSON-RPC envelope, and reads the response's `id` / `error` fields to route the reply and set the exit code.
 
 ## Configuration
 
@@ -91,7 +91,7 @@ Messages are opaque bytes end-to-end — the proxy never parses JSON.
 | `MCP_PROXY_TOKEN` | *(unset)* | Bearer token sent as `Authorization: Bearer <token>` on the WebSocket upgrade. |
 | `MCP_PROXY_PING_INTERVAL` | `5s` | How often the proxy sends WebSocket ping frames. Set to `0` to disable keepalive. |
 | `MCP_PROXY_PONG_TIMEOUT` | `2s` | How long to wait for a pong before treating the daemon as unresponsive and reconnecting. |
-| `MCP_PROXY_DEBUG` | *(unset)* | `1` logs to a temp file; a path logs to that path. Log file is created with `0600` permissions. |
+| `MCP_PROXY_DEBUG` | *(unset)* | `1` or `true` logs to `$TMPDIR/mcp-proxy-<pid>.log`; any other value is treated as a file path. Log file is created with `0600` permissions. |
 
 ### Config File
 

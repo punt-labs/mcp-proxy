@@ -36,33 +36,45 @@ parsing, no routing, no transformation.  Two concurrent channels carry
 messages in each direction (stdin$\to$daemon, daemon$\to$stdout), with
 coordinated shutdown on stdin EOF or daemon disconnect.
 
-This specification models four aspects of the proxy:
+This specification models three aspects of the proxy:
 
 \begin{enumerate}
   \item The \textbf{proxy lifecycle}: startup, connection, bridging, and
-    shutdown phases.
+    shutdown phases (\texttt{main.go} and the \texttt{Proxy} schema).
   \item The \textbf{bridge}: bidirectional message forwarding with ordering
-    guarantees and shutdown coordination on a single WebSocket connection.
-  \item The \textbf{keepalive}: WebSocket ping/pong liveness detection that
-    tears down a stalled connection.
+    guarantees and shutdown coordination on a single WebSocket connection
+    (\texttt{internal/bridge}).
   \item The \textbf{session key resolver}: process tree walking to find the
-    topmost \texttt{claude} ancestor.
+    topmost \texttt{claude} ancestor (\texttt{internal/session}).
 \end{enumerate}
 
-\paragraph{Scope.}  This document is a \emph{per-connection} model.  The
-\texttt{internal/bridge} package it corresponds to is used unchanged by the
-higher-level \texttt{internal/reconnect} coordinator, which loops over
-connections with exponential backoff and preserves in-flight messages
-across reconnects; by \texttt{internal/hook}, which performs one-shot
-JSON-RPC calls to a dedicated \texttt{/hook} endpoint; and by the
-\texttt{--health} entry point, which dials and closes without exchanging
-any bridge messages.  On reconnect, the coordinator replays the cached
-\texttt{initialize} request and \texttt{notifications/initialized}
-notification so the newly-connected daemon inherits the client's MCP
-session state.  These four composition layers---reconnect, keepalive
-recovery, hook relay, and handshake replay---are described in
-\texttt{DESIGN.md} (DES-009, DES-010, DES-011, DES-013, DES-016) and are
-outside the scope of this Z model.
+\paragraph{Scope.}  This document is a \emph{per-connection} model of the
+forwarding and shutdown state machine.  Five layers of runtime behaviour
+that live outside this model but compose with it are described in
+\texttt{DESIGN.md}:
+
+\begin{enumerate}
+  \item \textbf{DES-009 reconnect coordinator}
+    (\texttt{internal/reconnect}) --- loops over connections with
+    exponential backoff and preserves in-flight stdin messages across
+    reconnects.
+  \item \textbf{DES-010 health check} --- the \texttt{--health} entry
+    point dials the daemon and closes without exchanging bridge
+    messages.
+  \item \textbf{DES-011 hook relay} (\texttt{internal/hook}) ---
+    one-shot JSON-RPC calls to a dedicated \texttt{/hook} endpoint.
+  \item \textbf{DES-013 keepalive} --- WebSocket ping/pong liveness
+    detection that tears down a stalled connection so the reconnect
+    coordinator can retry.
+  \item \textbf{DES-016 handshake replay} ---
+    (\texttt{internal/reconnect/handshake.go}) caches the client's
+    \texttt{initialize} request and \texttt{notifications/initialized}
+    notification and replays them on reconnect so the newly-connected
+    daemon inherits the client's negotiated MCP session state.
+\end{enumerate}
+
+Each of these layers is a candidate for its own Z extension; the model
+here deliberately stops at the single-connection boundary.
 
 % ───────────────────────────────────────────────────────────────────
 \section{Basic Types}
