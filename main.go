@@ -1,3 +1,6 @@
+// Command mcp-proxy is the entrypoint binary that bridges MCP stdio transport
+// to a daemon over WebSocket. It runs in three modes: long-running proxy
+// (default), one-shot health check (--health), and one-shot hook relay (--hook).
 package main
 
 import (
@@ -200,14 +203,14 @@ func runHealthCheck(rawURL string, extraHeaders map[string]string, caCert string
 		fmt.Fprintf(os.Stderr, "mcp-proxy: health check failed: %v\n", err)
 		return 1
 	}
-	conn.CloseNow()
+	_ = conn.CloseNow() // process is about to exit; nothing to recover from
 	fmt.Fprintln(os.Stderr, "mcp-proxy: ok")
 	return 0
 }
 
 func runProxy(rawURL string, extraHeaders map[string]string, caCert string) int {
 	logger, logCloser := debuglog.FromEnv()
-	defer logCloser.Close()
+	defer func() { _ = logCloser.Close() }()
 
 	// First signal cancels context (graceful shutdown).
 	// Second signal force-exits immediately.
@@ -244,7 +247,7 @@ func runProxy(rawURL string, extraHeaders map[string]string, caCert string) int 
 
 func runHook(rawURL string, event string, async bool, extraHeaders map[string]string, caCert string) int {
 	logger, logCloser := debuglog.FromEnv()
-	defer logCloser.Close()
+	defer func() { _ = logCloser.Close() }()
 
 	sessionKey := session.FindSessionKey()
 	logger.Debug("hook mode", "event", event, "async", async, "session_key", sessionKey)
@@ -272,7 +275,7 @@ func runHook(rawURL string, event string, async bool, extraHeaders map[string]st
 		fmt.Fprintf(os.Stderr, "mcp-proxy: %v\n", err)
 		return 1
 	}
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }() // process is about to exit
 
 	conn.SetReadLimit(1024 * 1024) // 1MB
 

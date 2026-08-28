@@ -21,7 +21,7 @@ func TestSyncRequestResponse(t *testing.T) {
 	d := testutil.NewMockDaemon()
 	defer d.Close()
 
-	d.Handler = func(msg []byte) []byte {
+	d.Handler = func(_ []byte) []byte {
 		return []byte(`{"jsonrpc":"2.0","id":1,"result":{"additionalContext":"hello from daemon"}}`)
 	}
 
@@ -48,7 +48,7 @@ func TestSyncErrorResponse(t *testing.T) {
 	d := testutil.NewMockDaemon()
 	defer d.Close()
 
-	d.Handler = func(msg []byte) []byte {
+	d.Handler = func(_ []byte) []byte {
 		return []byte(`{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"internal error"}}`)
 	}
 
@@ -155,7 +155,7 @@ func TestEmptyStdin(t *testing.T) {
 	d := testutil.NewMockDaemon()
 	defer d.Close()
 
-	d.Handler = func(msg []byte) []byte {
+	d.Handler = func(_ []byte) []byte {
 		return []byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`)
 	}
 
@@ -189,7 +189,7 @@ func TestEventNamePassthrough(t *testing.T) {
 	d := testutil.NewMockDaemon()
 	defer d.Close()
 
-	d.Handler = func(msg []byte) []byte {
+	d.Handler = func(_ []byte) []byte {
 		return []byte(`{"jsonrpc":"2.0","id":1,"result":{}}`)
 	}
 
@@ -230,7 +230,7 @@ func TestLargePayload(t *testing.T) {
 	d := testutil.NewMockDaemon()
 	defer d.Close()
 
-	d.Handler = func(msg []byte) []byte {
+	d.Handler = func(_ []byte) []byte {
 		return []byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`)
 	}
 
@@ -300,7 +300,7 @@ func TestNoEOFStdinDoesNotHang(t *testing.T) {
 	d := testutil.NewMockDaemon()
 	defer d.Close()
 
-	d.Handler = func(msg []byte) []byte {
+	d.Handler = func(_ []byte) []byte {
 		return []byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`)
 	}
 
@@ -342,7 +342,7 @@ func TestEmptyStdinNoEOF(t *testing.T) {
 	d := testutil.NewMockDaemon()
 	defer d.Close()
 
-	d.Handler = func(msg []byte) []byte {
+	d.Handler = func(_ []byte) []byte {
 		return []byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`)
 	}
 

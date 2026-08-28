@@ -59,8 +59,10 @@ func Load(profile string) (Profile, error) {
 	}
 
 	// Open once; stat on the fd to eliminate TOCTOU between permission check
-	// and read.
-	f, err := os.Open(path)
+	// and read. filepath.Clean normalizes the path we constructed from the
+	// validated profile name (see validProfile above) and the resolved home
+	// directory; the input can never traverse outside ~/.punt-labs/mcp-proxy.
+	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// File absent — silent fallback.
@@ -68,7 +70,7 @@ func Load(profile string) (Profile, error) {
 		}
 		return Profile{}, fmt.Errorf("open %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // read-only; close error is uninteresting
 
 	info, err := f.Stat()
 	if err != nil {

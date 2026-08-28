@@ -7,11 +7,13 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -172,8 +174,16 @@ func dial(ctx context.Context, rawURL string, sessionKey int, subprotocols []str
 		logger.Debug("ignoring ca_cert for non-TLS scheme", "scheme", u.Scheme)
 	}
 
-	conn, _, err := websocket.Dial(dialCtx, u.String(), opts)
+	conn, resp, err := websocket.Dial(dialCtx, u.String(), opts)
 	if err != nil {
+		// coder/websocket returns a non-nil *http.Response when the HTTP upgrade
+		// fails with a real HTTP reply. Drain and close the Body so net/http can
+		// return the underlying TCP connection to its idle pool for reuse
+		// instead of leaking it into TIME_WAIT.
+		if resp != nil && resp.Body != nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+		}
 		addr := u.Host
 
 		var netErr *net.OpError
@@ -209,7 +219,9 @@ func dial(ctx context.Context, rawURL string, sessionKey int, subprotocols []str
 // tlsConfigWithCA builds a tls.Config that trusts only the CA cert at path.
 // System roots are not included; the pool is pinned to the provided cert.
 func tlsConfigWithCA(path string) (*tls.Config, error) {
-	pem, err := os.ReadFile(path)
+	// filepath.Clean normalizes the caller-supplied path (from the [profile]
+	// TOML file, which Load reads only after verifying 0o600 ownership).
+	pem, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, &CACertError{Path: path, Err: err}
 	}
