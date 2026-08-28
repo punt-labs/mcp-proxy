@@ -1,4 +1,4 @@
-.PHONY: help lint docs test test-e2e check format build install clean dist cover
+.PHONY: help lint lint-strict vulncheck docs test test-e2e check format build install clean dist cover
 
 VERSION ?= dev
 LDFLAGS      := -X main.version=$(VERSION)
@@ -11,6 +11,12 @@ lint: ## Lint (go vet + staticcheck)
 	go vet ./...
 	go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
 
+lint-strict: ## Lint (golangci-lint: errcheck, gosec, revive, gofumpt, ...)
+	golangci-lint run ./...
+
+vulncheck: ## Scan imports + call graph for known Go vulnerabilities
+	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
 docs: ## Lint markdown
 	npx --yes markdownlint-cli2 "**/*.md" "#node_modules"
 
@@ -20,7 +26,7 @@ test: ## Run tests with race detection
 test-e2e: build ## Run E2E tests (requires built binary)
 	go test -race -count=1 -tags=e2e ./internal/e2e/...
 
-check: lint docs test ## Run all quality gates
+check: lint lint-strict vulncheck docs test ## Run all quality gates
 
 format: ## Format code
 	gofmt -w .
