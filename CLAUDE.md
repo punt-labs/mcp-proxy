@@ -41,8 +41,9 @@ The proxy is transparent — it doesn't know what MCP tools exist. JSON-RPC mess
 |---------|-------------|
 | `main` | Entry point: parse args, health check, hook relay, reconnecting proxy, signal handling |
 | `internal/bridge` | Bidirectional stdin↔WebSocket forwarding (two goroutines + WaitGroup) |
+| `internal/config` | TOML profile loader for `~/.punt-labs/mcp-proxy/<profile>.toml` (URL + headers), permissions-checked |
 | `internal/hook` | One-shot JSON-RPC relay for hook scripts (sync request/response, async notification) |
-| `internal/reconnect` | Reconnecting bridge: stdin channel, per-connection goroutines, backoff |
+| `internal/reconnect` | Reconnecting bridge: stdin channel, per-connection goroutines, backoff, MCP handshake replay |
 | `internal/transport` | WebSocket dial with typed errors, session key injection, bearer token auth |
 | `internal/session` | Process-tree walking to resolve Claude session key |
 | `internal/debuglog` | Structured `slog` debug logging via `MCP_PROXY_DEBUG` env var |
@@ -79,6 +80,59 @@ mcp-proxy is a Go static binary that sits on the trust boundary between Claude C
 
 Note: `bwk` (Kernighan) covers Go implementation; `rop` (Pike) and `mdm` (McIlroy) cover CLI/Unix surface and pipe correctness. For pure-Go internals, prefer `bwk` worker / `rop` evaluator. Use the `quick` pipeline for surgical bridge fixes; `standard` for any change touching the wire format or session-identity contract.
 
+### Mission Workflow
+
+Every non-trivial code change goes through an ethos mission. The leader (Claude) writes contracts, dispatches workers, reviews, and closes; the leader **does not write code** in the write set. Direct-authored files are limited to `CLAUDE.md`, `DESIGN.md`, `README.md`, `CHANGELOG.md`, memory files, and mission-contract YAMLs.
+
+**Pipelines** (list via `ethos mission pipeline list`):
+
+| Pipeline | Stages | Use |
+|----------|--------|-----|
+| `quick`    | 2 | Single-module bugfix, well-understood change |
+| `standard` | 5 | Feature or refactor: design → implement → test → review → document |
+| `formal`   | 7 | Anything touching the Z spec or bridge invariants |
+| `coe`      | 5 | Cause-of-error investigation for a recurring bug or incident |
+| `coverage` | 3 | Targeted test-coverage improvement |
+| `full`     | 9 | Complete lifecycle including product validation and retrospective |
+| `product`  | 6 | New user-visible feature with Working Backwards up front |
+| `docs`     | 2 | Doc-only change with review |
+
+For mcp-proxy, `standard` is the default for anything touching CLI surface, transport, session identity, or reconnect. `quick` for surgical fixes inside a single package where the write set is obvious.
+
+**Dispatch is two operations, never one.** `ethos mission create` writes the contract; a separate `Agent(subagent_type=<worker>, run_in_background=true)` spawns the worker. Skipping the Agent call leaves the contract orphaned — nothing happens.
+
+```bash
+# Author a contract, then dispatch
+ethos mission create --file .tmp/missions/<name>.yaml     # writes contract, returns mission ID
+# then, from the leader session:
+Agent(subagent_type=<worker>, run_in_background=true)     # spawns worker; verify via TaskList
+
+# Track
+ethos mission show <id>
+ethos mission log <id>
+ethos mission results <id>
+
+# Close
+ethos mission close <id>                                  # pass
+ethos mission reflect <id> --file <path>                  # needs another round
+ethos mission advance <id>
+ethos mission close <id> --status failed                  # fail
+```
+
+Mission contract YAMLs go in `.tmp/missions/`. Worker result artifacts go in `.tmp/missions/results/`.
+
+**Between design and implementation, the leader MUST review the design and escalate substantive issues to the operator before dispatching implementation.** A substantive issue is anything that deviates from the operator's stated structure or goals, introduces a layering violation, breaks an element-purity or trust-model invariant, creates a naming conflict, or would cost more to fix in implementation than in the design. Review means: read the merged design end-to-end, cite `file:line` for each issue, write a concrete "recommend X" alternative, present all issues to the operator with an explicit ASK per issue, and **wait** for ratification. Do not dispatch implementation while a "should we discuss" question is outstanding.
+
+**Every implementation mission contract MUST include commit-per-step in its success criteria.** Required criterion text:
+
+> "Commit incrementally — one commit per logical step (file group, single concern, or single PR-equivalent slice). Each commit must pass `make check`. Do not accumulate more than 30 minutes of uncommitted changes."
+
+**Watch for stuck workers by filesystem, not commits.** Assess progress by reading working-tree edits (`git status`, `git diff`, reading the files) — is code changing and advancing? Only a genuine filesystem stall (no edits changing over a long window) with an unresponsive worker justifies `SendMessage` for status and, as a last resort, taking over. Do not kill an agent for not committing, and do not commit its work by proxy while it is actively editing — let workers commit and push their own work on their own timeline.
+
+**Sub-agent calls always run in the background.** Every `Agent(subagent_type=…)` invocation uses `run_in_background=true`. Zero exceptions. Set `subagent_type` to the ethos identity handle from the delegation table (`bwk`, `mdm`, `rop`, `djb`, `adb`, `rmh`) — bare `Agent` calls spawn an empty shell with no personality or expertise.
+
+**Review-cycle fix rounds** (Copilot / Bugbot findings, mechanical lint sweeps where the write set is obvious) use bare `Agent(subagent_type=<handle>)` instead of a mission. Missions are for design work and multi-step implementations; a review round on a well-scoped diff does not need the ceremony.
+
 ## Quality Gates
 
 Run before every commit:
@@ -87,7 +141,13 @@ Run before every commit:
 make check
 ```
 
-The Makefile is the source of truth for what `check` means (`make help` to see all targets). Expands to `make lint docs test` which runs `go vet`, `staticcheck`, `markdownlint`, and `go test -race`.
+The Makefile is the source of truth for what `check` means (`make help` to see all targets). Expands to `make lint lint-strict vulncheck docs test`:
+
+- `lint` — `go vet` + `staticcheck`
+- `lint-strict` — `golangci-lint` (errcheck, gosec, revive, bodyclose, errorlint, misspell, ineffassign, staticcheck, govet, unused, plus gofumpt + goimports formatters — config in `.golangci.yml`)
+- `vulncheck` — `govulncheck` against the Go vulnerability database
+- `docs` — `markdownlint-cli2`
+- `test` — `go test -race -count=1 ./...`
 
 ## Testing
 
@@ -157,12 +217,9 @@ git push
 
 ## Design Decisions
 
-Log design decisions in `DESIGN.md` before implementing. The README.md contains the initial design spec with open questions. Key decisions to settle:
+Log design decisions in `DESIGN.md` as new `DES-###` entries before implementing. `DESIGN.md` is the authoritative record — every architectural choice, alternatives considered, and outcome. Every design change consults this log first and does not revisit a settled decision without new evidence.
 
-1. **Transport**: WebSocket vs raw Unix socket vs NDJSON — see README.md transport comparison
-2. **Session identity algorithm**: Process-tree walking (ported from biff's `find_session_key()`)
-3. **Daemon auto-start**: Proxy starts daemon if missing, or fail fast?
-4. **Graceful degradation**: Daemon down → fall back to in-process, or exit?
+The core decisions are settled (transport, session identity, concurrency, message format, daemon lifecycle, debug logging, auth, signal handling, reconnect, health check, hook relay, deadline-based stdin reads, keepalive, static build, URL canonicalization, handshake replay — DES-001 through DES-016). Any new work adds a new DES-* entry with rationale before touching code.
 
 ## Documentation Maintenance
 
