@@ -203,14 +203,16 @@ func runHealthCheck(rawURL string, extraHeaders map[string]string, caCert string
 		fmt.Fprintf(os.Stderr, "mcp-proxy: health check failed: %v\n", err)
 		return 1
 	}
-	conn.CloseNow()
+	if closeErr := conn.CloseNow(); closeErr != nil {
+		logger.Debug("closing health check connection", "error", closeErr)
+	}
 	fmt.Fprintln(os.Stderr, "mcp-proxy: ok")
 	return 0
 }
 
 func runProxy(rawURL string, extraHeaders map[string]string, caCert string) int {
 	logger, logCloser := debuglog.FromEnv()
-	defer logCloser.Close()
+	defer func() { _ = logCloser.Close() }()
 
 	// First signal cancels context (graceful shutdown).
 	// Second signal force-exits immediately.
@@ -247,7 +249,7 @@ func runProxy(rawURL string, extraHeaders map[string]string, caCert string) int 
 
 func runHook(rawURL string, event string, async bool, extraHeaders map[string]string, caCert string) int {
 	logger, logCloser := debuglog.FromEnv()
-	defer logCloser.Close()
+	defer func() { _ = logCloser.Close() }()
 
 	sessionKey := session.FindSessionKey()
 	logger.Debug("hook mode", "event", event, "async", async, "session_key", sessionKey)
@@ -275,7 +277,11 @@ func runHook(rawURL string, event string, async bool, extraHeaders map[string]st
 		fmt.Fprintf(os.Stderr, "mcp-proxy: %v\n", err)
 		return 1
 	}
-	defer conn.CloseNow()
+	defer func() {
+		if err := conn.CloseNow(); err != nil {
+			logger.Debug("closing hook connection", "error", err)
+		}
+	}()
 
 	conn.SetReadLimit(1024 * 1024) // 1MB
 

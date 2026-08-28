@@ -70,7 +70,7 @@ func Load(profile string) (Profile, error) {
 		}
 		return Profile{}, fmt.Errorf("open %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // read-only; close error is uninteresting
 
 	info, err := f.Stat()
 	if err != nil {

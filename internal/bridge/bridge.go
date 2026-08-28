@@ -25,7 +25,11 @@ import (
 func Run(ctx context.Context, stdin io.Reader, stdout io.Writer, conn *websocket.Conn, logger *slog.Logger) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	defer conn.CloseNow()
+	defer func() {
+		if err := conn.CloseNow(); err != nil {
+			logger.Debug("closing daemon connection", "error", err)
+		}
+	}()
 
 	// MCP messages can be large (tool responses with embedded data).
 	// Default read limit in github.com/coder/websocket is 32KB.
@@ -97,7 +101,9 @@ func Run(ctx context.Context, stdin io.Reader, stdout io.Writer, conn *websocket
 			cancel()
 			// Unblock the scanner if it's stuck on stdin.Read().
 			if closer, ok := stdin.(io.Closer); ok {
-				closer.Close()
+				if err := closer.Close(); err != nil {
+					logger.Debug("closing stdin", "error", err)
+				}
 			}
 		}()
 

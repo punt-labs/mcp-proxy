@@ -133,7 +133,9 @@ func RunWithConfig(ctx context.Context, stdin io.Reader, stdout io.Writer, dial 
 
 		isReconnect := connNum > 1
 		pending, err = runConnection(ctx, conn, lines, stdinDone, stdout, pending, cfg, logger, &hs, isReconnect)
-		conn.CloseNow()
+		if closeErr := conn.CloseNow(); closeErr != nil {
+			logger.Debug("closing daemon connection", "error", closeErr)
+		}
 
 		if err == nil {
 			// stdin EOF — clean shutdown.

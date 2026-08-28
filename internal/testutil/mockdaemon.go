@@ -161,7 +161,7 @@ func (d *MockDaemon) CloseConn() {
 	c := d.conn
 	d.mu.Unlock()
 	if c != nil {
-		c.Close(websocket.StatusGoingAway, "daemon shutting down")
+		_ = c.Close(websocket.StatusGoingAway, "daemon shutting down")
 	}
 }
 
@@ -184,7 +184,7 @@ func (d *MockDaemon) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conn.SetReadLimit(1024 * 1024) // 1MB to match proxy
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 	d.mu.Lock()
 	d.connected = true
@@ -295,7 +295,7 @@ func (d *MockDaemon) handleHook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conn.SetReadLimit(1024 * 1024)
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 	d.mu.Lock()
 	d.connected = true

@@ -146,7 +146,7 @@ func sendRequest(ctx context.Context, conn *websocket.Conn, method string, param
 
 		// Handle error responses without an id (e.g., JSON-RPC parse errors).
 		if !hasID(resp.ID) && hasValue(resp.Error) {
-			fmt.Fprintf(stderr, "%s\n", resp.Error)
+			_, _ = fmt.Fprintf(stderr, "%s\n", resp.Error)
 			return ErrDaemonError
 		}
 
@@ -158,13 +158,13 @@ func sendRequest(ctx context.Context, conn *websocket.Conn, method string, param
 
 		// Error response: print error to stderr, return sentinel for exit code 1.
 		if hasValue(resp.Error) {
-			fmt.Fprintf(stderr, "%s\n", resp.Error)
+			_, _ = fmt.Fprintf(stderr, "%s\n", resp.Error)
 			return ErrDaemonError
 		}
 
 		// Success response: print result to stdout.
 		if hasValue(resp.Result) {
-			fmt.Fprintf(stdout, "%s\n", resp.Result)
+			_, _ = fmt.Fprintf(stdout, "%s\n", resp.Result)
 		}
 
 		logger.Debug("received response", "size", len(resp.Result))
