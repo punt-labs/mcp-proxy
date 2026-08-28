@@ -1,3 +1,6 @@
+// Command mcp-proxy is the entrypoint binary that bridges MCP stdio transport
+// to a daemon over WebSocket. It runs in three modes: long-running proxy
+// (default), one-shot health check (--health), and one-shot hook relay (--hook).
 package main
 
 import (

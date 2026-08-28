@@ -132,7 +132,7 @@ func TestBridge_BidirectionalPush(t *testing.T) {
 	defer d.Close()
 
 	// Handler returns nil for requests — no echo. We test push only.
-	d.Handler = func(msg []byte) []byte { return nil }
+	d.Handler = func(_ []byte) []byte { return nil }
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
