@@ -11,7 +11,7 @@ Static Go binary, no runtime dependencies. Cross-compiled to four targets and at
 - `mcp-proxy-linux-arm64`
 - `mcp-proxy-linux-amd64`
 
-Each release also carries a `checksums.txt` with SHA-256 sums. Build reproducibly with `make dist` — the Makefile pins `CGO_ENABLED=0` and passes `-ldflags="-s -w -X main.version=$(VERSION)"` for size and version stamping.
+Each release also carries a `checksums.txt` with SHA-256 sums. `make dist` cross-compiles release-style binaries with `CGO_ENABLED=0` and `-ldflags="-s -w -X main.version=$(VERSION)"` for a static build, stripped symbols, and a stamped version. Byte-for-byte reproducibility across machines depends on toolchain, dependency, and environment pinning that this Makefile does not enforce.
 
 ## Install channels
 

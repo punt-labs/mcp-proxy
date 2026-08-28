@@ -14,7 +14,7 @@
 
 \title{mcp-proxy: A Z Specification}
 \author{Formal Model of a Bidirectional MCP Proxy}
-\date{March 2026}
+\date{}
 \hypersetup{
   pdftitle={mcp-proxy: A Z Specification},
   pdfauthor={Punt Labs},
@@ -40,12 +40,41 @@ This specification models three aspects of the proxy:
 
 \begin{enumerate}
   \item The \textbf{proxy lifecycle}: startup, connection, bridging, and
-    shutdown phases.
+    shutdown phases (\texttt{main.go} and the \texttt{Proxy} schema).
   \item The \textbf{bridge}: bidirectional message forwarding with ordering
-    guarantees and shutdown coordination.
+    guarantees and shutdown coordination on a single WebSocket connection
+    (\texttt{internal/bridge}).
   \item The \textbf{session key resolver}: process tree walking to find the
-    topmost \texttt{claude} ancestor.
+    topmost \texttt{claude} ancestor (\texttt{internal/session}).
 \end{enumerate}
+
+\paragraph{Scope.}  This document is a \emph{per-connection} model of the
+forwarding and shutdown state machine.  Five layers of runtime behaviour
+that live outside this model but compose with it are described in
+\texttt{DESIGN.md}:
+
+\begin{enumerate}
+  \item \textbf{DES-009 reconnect coordinator}
+    (\texttt{internal/reconnect}) --- loops over connections with
+    exponential backoff and preserves in-flight stdin messages across
+    reconnects.
+  \item \textbf{DES-010 health check} --- the \texttt{--health} entry
+    point dials the daemon and closes without exchanging bridge
+    messages.
+  \item \textbf{DES-011 hook relay} (\texttt{internal/hook}) ---
+    one-shot JSON-RPC calls to a dedicated \texttt{/hook} endpoint.
+  \item \textbf{DES-013 keepalive} --- WebSocket ping/pong liveness
+    detection that tears down a stalled connection so the reconnect
+    coordinator can retry.
+  \item \textbf{DES-016 handshake replay} ---
+    (\texttt{internal/reconnect/handshake.go}) caches the client's
+    \texttt{initialize} request and \texttt{notifications/initialized}
+    notification and replays them on reconnect so the newly-connected
+    daemon inherits the client's negotiated MCP session state.
+\end{enumerate}
+
+Each of these layers is a candidate for its own Z extension; the model
+here deliberately stops at the single-connection boundary.
 
 % ───────────────────────────────────────────────────────────────────
 \section{Basic Types}
