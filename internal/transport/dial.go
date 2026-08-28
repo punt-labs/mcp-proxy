@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -176,9 +177,11 @@ func dial(ctx context.Context, rawURL string, sessionKey int, subprotocols []str
 	conn, resp, err := websocket.Dial(dialCtx, u.String(), opts)
 	if err != nil {
 		// coder/websocket returns a non-nil *http.Response when the HTTP upgrade
-		// fails with a real HTTP reply; its Body must be drained and closed to
-		// let net/http reuse the underlying connection.
+		// fails with a real HTTP reply. Drain and close the Body so net/http can
+		// return the underlying TCP connection to its idle pool for reuse
+		// instead of leaking it into TIME_WAIT.
 		if resp != nil && resp.Body != nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = resp.Body.Close()
 		}
 		addr := u.Host
