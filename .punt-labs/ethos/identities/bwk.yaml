@@ -5,3 +5,6 @@ writing_style: kernighan-prose
 personality: kernighan
 talents:
     - engineering
+    - unix
+    - cli
+    - go

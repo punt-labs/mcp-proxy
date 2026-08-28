@@ -5,3 +5,5 @@ writing_style: mcilroy-prose
 personality: mcilroy
 talents:
     - engineering
+    - unix
+    - cli
