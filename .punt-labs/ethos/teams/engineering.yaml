@@ -1,0 +1,51 @@
+name: engineering
+repositories:
+  - punt-labs/mcp-proxy
+members:
+  - identity: jfreeman
+    role: ceo
+  - identity: claude
+    role: coo
+  # Go
+  - identity: bwk
+    role: go-specialist
+  # Python
+  - identity: rmh
+    role: python-specialist
+  # CLI
+  - identity: mdm
+    role: cli-specialist
+  - identity: rop
+    role: cli-minimalist
+  # Security
+  - identity: djb
+    role: security-engineer
+  # Infrastructure / DevOps
+  - identity: adb
+    role: infra-engineer
+collaborations:
+  - from: coo
+    to: ceo
+    type: reports_to
+  - from: go-specialist
+    to: coo
+    type: reports_to
+  - from: python-specialist
+    to: coo
+    type: reports_to
+  - from: cli-specialist
+    to: coo
+    type: reports_to
+  - from: cli-minimalist
+    to: coo
+    type: reports_to
+  - from: security-engineer
+    to: coo
+    type: reports_to
+  - from: infra-engineer
+    to: coo
+    type: reports_to
+  # Domain pairing
+  - from: cli-minimalist
+    to: cli-specialist
+    type: collaborates_with

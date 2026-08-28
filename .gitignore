@@ -29,6 +29,15 @@
 .punt-labs/vox/vox.local.md
 .punt-labs/lux.md
 
+# --- Vendored ethos registry: runtime state (regenerated per-machine) ---
+# The identity/role/personality/team subtree under .punt-labs/ethos/ is
+# vendored from punt-labs/team; only the registry is tracked, not the
+# per-session mission and biff state that ethos writes at runtime.
+.punt-labs/ethos/missions/
+.punt-labs/ethos/missions.jsonl
+.punt-labs/ethos/sessions/
+.punt-labs/ethos/.biff
+
 # --- Claude Code runtime state ---
 .claude/*
 !.claude/settings.json
