@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -209,7 +210,9 @@ func dial(ctx context.Context, rawURL string, sessionKey int, subprotocols []str
 // tlsConfigWithCA builds a tls.Config that trusts only the CA cert at path.
 // System roots are not included; the pool is pinned to the provided cert.
 func tlsConfigWithCA(path string) (*tls.Config, error) {
-	pem, err := os.ReadFile(path)
+	// filepath.Clean normalizes the caller-supplied path (from the [profile]
+	// TOML file, which Load reads only after verifying 0o600 ownership).
+	pem, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, &CACertError{Path: path, Err: err}
 	}
