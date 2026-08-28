@@ -1,13 +1,14 @@
 # mcp-proxy
 
-> Lightweight Go proxy bridging MCP stdio transport to a shared daemon process.
+> Go binary that bridges MCP stdio to a shared daemon over WebSocket.
 
 [![License](https://img.shields.io/github/license/punt-labs/mcp-proxy)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/punt-labs/mcp-proxy/test.yml?label=CI)](https://github.com/punt-labs/mcp-proxy/actions/workflows/test.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/punt-labs/mcp-proxy.svg)](https://pkg.go.dev/github.com/punt-labs/mcp-proxy)
 
-Claude Code spawns a fresh MCP server process for every session. If your server loads an ML model, opens a database pool, or holds a NATS connection, each session duplicates all of it. A memory leak in the server leaks inside Claude Code's process tree. A hang in the server freezes the session. A crash takes it down entirely.
+Claude Code spawns a fresh MCP server process per session, which duplicates any shared state — ML models, connection pools, singleton devices — across every open tab. `mcp-proxy` is a Go binary that Claude Code spawns instead of the real MCP server; it forwards MCP JSON-RPC over WebSocket to a single shared daemon and never inspects message content. Any MCP server that exposes a WebSocket endpoint speaking MCP works with it, unchanged.
 
-mcp-proxy puts a process boundary between Claude Code and your MCP server. Instead of spawning the real server, Claude Code spawns a tiny Go binary (~6MB, <10ms startup) that forwards MCP messages over WebSocket to a single shared daemon:
+**Platforms:** macOS, Linux
 
 ```text
                     stdio                      WebSocket
@@ -15,45 +16,10 @@ Claude Code ◄──────────────► mcp-proxy ◄──
              MCP JSON-RPC                                       (one process)
 ```
 
-**Runtime protection.** The proxy is a single Go binary that isolates Claude Code from the MCP server process. If the daemon leaks memory, crashes, becomes unreachable, or hangs, Claude Code's process tree is unaffected — the proxy detects failures via WebSocket keepalive (5s ping, 2s pong timeout) and reconnects automatically. In-flight requests may fail, but subsequent requests proceed normally once the daemon recovers.
-
-**Shared state.** Three terminal tabs share one daemon process instead of three copies of your models, connections, and state. One embedding model in memory, one connection pool, one audio device.
-
-**Hook speed.** Claude Code hook scripts have a ~100ms budget. Heavy CLI imports easily blow this. The proxy's `--hook` mode relays JSON-RPC to the daemon in ~15ms — the hook runs its logic on the daemon side where everything is already loaded.
-
-The proxy works with **any MCP server** that exposes a WebSocket endpoint speaking MCP JSON-RPC — it never inspects message content. Your server doesn't need to be modified; it just needs a WebSocket transport in addition to (or instead of) stdio.
-
-**Platforms:** macOS, Linux
-
-## Daemon Requirements
-
-Your MCP server must:
-
-1. **Accept WebSocket connections** with the `mcp` subprotocol (`Sec-WebSocket-Protocol: mcp`)
-2. **Speak MCP JSON-RPC 2.0** — one JSON object per WebSocket text frame
-3. **Be running before the proxy connects** — the proxy retries with backoff if the daemon is unreachable, but does not auto-start it
-
-Optionally, the daemon can:
-
-- **Read `?session_key=<pid>`** from the WebSocket upgrade URL to maintain per-session state (e.g., separate database selections per Claude Code tab)
-- **Push server-initiated messages** (e.g., `notifications/tools/list_changed`) — the proxy forwards them to stdout immediately
-
-### Authentication
-
-For remote daemons or daemons that require API keys, set `MCP_PROXY_TOKEN`:
+## Quick Start
 
 ```bash
-MCP_PROXY_TOKEN=your-api-key mcp-proxy wss://remote-host/mcp
-```
-
-The proxy sends this as `Authorization: Bearer <token>` on the WebSocket upgrade request.
-
-For local daemons, auth is typically unnecessary — binding to `127.0.0.1` (the default) is sufficient. The `?session_key=<pid>` query parameter can serve as lightweight per-session identity without requiring a shared secret.
-
-## Install
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/punt-labs/mcp-proxy/bdca3a6/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/punt-labs/mcp-proxy/main/install.sh | sh
 ```
 
 <details>
@@ -65,8 +31,7 @@ curl -fsSL https://github.com/punt-labs/mcp-proxy/releases/latest/download/mcp-p
 chmod +x ~/.local/bin/mcp-proxy
 ```
 
-Replace `darwin-arm64` with your platform: `darwin-amd64`, `linux-arm64`, `linux-amd64`.
-Ensure `~/.local/bin` is on your `PATH`.
+Substitute `darwin-arm64` for your platform: `darwin-amd64`, `linux-arm64`, `linux-amd64`. Ensure `~/.local/bin` is on your `PATH`.
 
 </details>
 
@@ -74,47 +39,55 @@ Ensure `~/.local/bin` is on your `PATH`.
 <summary>Inspect before running</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/punt-labs/mcp-proxy/bdca3a6/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/punt-labs/mcp-proxy/main/install.sh -o install.sh
 cat install.sh
 sh install.sh
 ```
 
 </details>
 
-## Usage
+Then point Claude Code at the proxy instead of the direct MCP server:
 
-```bash
-mcp-proxy ws://localhost:8420/mcp
+```json
+{
+  "mcpServers": {
+    "quarry": {
+      "type": "stdio",
+      "command": "mcp-proxy",
+      "args": ["ws://localhost:8420/mcp"]
+    }
+  }
+}
 ```
 
-The proxy reads JSON-RPC from stdin, forwards each line as a WebSocket text message to the daemon, and writes daemon responses to stdout. Messages are opaque — no parsing, no transformation.
+## Commands
 
-### Reconnect
+The binary has three modes, selected by flags. The daemon URL is supplied either as a positional argument or via `--config <profile>` (see [Configuration](#configuration)); a positional URL wins over the config's URL. In hook mode the URL and the `--hook <event>` flag can appear in either order.
 
-If the daemon disconnects (restart, crash) or stops responding, the proxy reconnects automatically with exponential backoff (250ms → 5s cap). Messages queued during disconnect are preserved and delivered on the next connection. Status is printed to stderr:
+| Invocation | What it does |
+|------------|--------------|
+| `mcp-proxy <url>` | Proxy mode. Reads JSON-RPC from stdin, forwards each line as a WebSocket text frame to the daemon, writes daemon responses (and server-initiated messages) to stdout. Reconnects on daemon disconnect. |
+| `mcp-proxy --health [<url>]` | Health check. Dials the daemon, closes immediately. Exits `0` on success, `1` on failure. Prints `mcp-proxy: ok` or a diagnostic to stderr. |
+| `mcp-proxy [<url>] --hook <event>` | Hook relay. Reads stdin, wraps it as `params` in a JSON-RPC request with method `hook/<event>`, and sends it to the daemon's `/hook` endpoint. Waits for the response and writes it to stdout. |
+| `mcp-proxy [<url>] --hook --async <event>` | Async hook relay. Same as above but sent as a notification (no `id`), and the proxy performs a graceful WebSocket close to guarantee delivery. |
+| `mcp-proxy --config <profile> [<url>]` | Read connection details (URL and headers) from `~/.punt-labs/mcp-proxy/<profile>.toml`. Combines with any of the modes above. |
 
-```text
-mcp-proxy: connected
-mcp-proxy: daemon disconnected, reconnecting...
-mcp-proxy: daemon unreachable, retrying in 250ms...
-mcp-proxy: connected
-```
+Messages are opaque bytes end-to-end — the proxy never parses JSON.
 
-### Keepalive
+## Configuration
 
-The proxy sends WebSocket pings every 5 seconds (default). If the daemon doesn't respond within 2 seconds, the proxy treats it as unresponsive and triggers a reconnect. This detects silent hangs — cases where the TCP connection stays open but the daemon has stopped processing.
+### Environment Variables
 
-Configure via environment variables:
-
-```bash
-MCP_PROXY_PING_INTERVAL=5s  mcp-proxy ws://localhost:8420/mcp  # default
-MCP_PROXY_PONG_TIMEOUT=2s   mcp-proxy ws://localhost:8420/mcp  # default
-MCP_PROXY_PING_INTERVAL=0   mcp-proxy ws://localhost:8420/mcp  # disable keepalive
-```
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `MCP_PROXY_TOKEN` | *(unset)* | Bearer token sent as `Authorization: Bearer <token>` on the WebSocket upgrade. |
+| `MCP_PROXY_PING_INTERVAL` | `5s` | How often the proxy sends WebSocket ping frames. Set to `0` to disable keepalive. |
+| `MCP_PROXY_PONG_TIMEOUT` | `2s` | How long to wait for a pong before treating the daemon as unresponsive and reconnecting. |
+| `MCP_PROXY_DEBUG` | *(unset)* | `1` logs to a temp file; a path logs to that path. Log file is created with `0600` permissions. |
 
 ### Config File
 
-Instead of passing a URL directly, you can store connection details in a profile file:
+Instead of passing a URL directly, store connection details in a profile:
 
 ```bash
 mcp-proxy --config quarry
@@ -130,183 +103,65 @@ url = "ws://okinos.user.home.lab:8420/mcp"
 Authorization = "Bearer <token>"
 ```
 
-The proxy enforces `0600` permissions on this file — it exits with an error if permissions are wider, since the file contains auth tokens.
-
-If the file doesn't exist or has no `[quarry]` section, the proxy falls back to `ws://localhost:8420/mcp`.
-
-You can still pass a URL alongside `--config`; the explicit URL takes precedence while headers from the config still apply:
-
-```bash
-mcp-proxy --config quarry ws://localhost:8420/mcp
-```
-
-### Health Check
-
-```bash
-mcp-proxy --health ws://localhost:8420/mcp
-```
-
-Dials the daemon, closes immediately, exits 0 on success or 1 on failure. Prints `mcp-proxy: ok` or `mcp-proxy: health check failed: <error>` to stderr. Useful for `quarry doctor`, launchd `KeepAlive`, and CI.
-
-### Hook Relay
-
-Claude Code hook scripts need to reach the daemon fast (<100ms budget). Heavy CLI imports blow this budget. The proxy's `--hook` mode sends one-shot JSON-RPC messages over WebSocket in ~15ms:
-
-```bash
-# Sync hook: send request, wait for response, print result to stdout
-mcp-proxy ws://localhost:8080 --hook PreToolUse < payload.json
-
-# Async hook: send notification, exit immediately
-mcp-proxy ws://localhost:8080 --hook --async SessionEnd < payload.json
-```
-
-The proxy reads stdin, wraps it as `params` in a JSON-RPC envelope with method `hook/<event>`, and sends it to the daemon's `/hook` endpoint. Sync hooks wait for a response; async hooks perform a graceful WebSocket close to guarantee delivery.
-
-**Usage in hook scripts:**
-
-```bash
-#!/usr/bin/env bash
-[[ -f "$HOME/.punt-hooks-kill" ]] && exit 0
-mcp-proxy ws://localhost:8080 --hook SessionStart
-```
-
-Hook mode does not reconnect — if the daemon is unreachable, it exits immediately with code 1.
-
-### MCP Server Configuration
-
-Replace the direct MCP server command with the proxy:
-
-```json
-{
-  "mcpServers": {
-    "quarry": {
-      "type": "stdio",
-      "command": "mcp-proxy",
-      "args": ["ws://localhost:8420/mcp"]
-    }
-  }
-}
-```
-
-### Debug Logging
-
-```bash
-MCP_PROXY_DEBUG=1 mcp-proxy ws://localhost:8420/mcp              # Log to temp file
-MCP_PROXY_DEBUG=.tmp/proxy.log mcp-proxy ws://localhost:8420/mcp # Log to specific file
-```
-
-Logs include message sizes, connection events, and error details. Stdout is never polluted — all diagnostics go to the debug log file.
+The proxy enforces `0600` permissions on this file and exits with an error if permissions are wider. If the section is absent, the proxy falls back to `ws://localhost:8420/mcp`. An explicit URL on the command line takes precedence over the config's `url`; headers still apply.
 
 ### Exit Codes
 
 | Code | Meaning |
 |------|---------|
-| 0 | Clean shutdown (stdin EOF), health check success, or hook success |
-| 1 | Runtime error, health check failure, or daemon error response |
-| 2 | Usage error (wrong arguments) |
+| `0` | Clean shutdown (stdin EOF), health check success, or hook success |
+| `1` | Runtime error, health check failure, or daemon error response |
+| `2` | Usage error (missing or malformed arguments) |
 
 ### Signal Handling
 
-First SIGINT/SIGTERM triggers graceful shutdown (close WebSocket, drain). Second signal force-exits immediately.
+The first `SIGINT` or `SIGTERM` triggers a graceful shutdown: close the WebSocket, drain, exit `0`. A second signal force-exits immediately.
+
+## Daemon Requirements
+
+An MCP daemon that mcp-proxy connects to must:
+
+1. Accept WebSocket connections with the `mcp` subprotocol (`Sec-WebSocket-Protocol: mcp`).
+2. Speak MCP JSON-RPC 2.0 — one JSON object per WebSocket text frame.
+3. Be running before the proxy connects. The proxy retries with exponential backoff if the daemon is unreachable, but does not start it.
+
+Optionally, the daemon can read `?session_key=<pid>` from the WebSocket upgrade URL to maintain per-session state, and push server-initiated messages (e.g. `notifications/tools/list_changed`) which the proxy forwards to stdout as they arrive.
+
+For a full daemon-side integration guide including WebSocket ping/pong library notes, session identity, authentication, and the hook endpoint, see [docs/daemon-guide.md](docs/daemon-guide.md).
 
 ## How It Works
 
-### Session Identity
+**Session identity.** The proxy walks the process tree upward to find the topmost `claude` ancestor PID (`ps -eo pid=,ppid=,comm=`), then passes it as `?session_key=<pid>` on the WebSocket upgrade. A daemon can key per-session state off this value.
 
-The proxy resolves which Claude Code session spawned it by walking the process tree (`ps -eo pid=,ppid=,comm=`) upward to find the topmost `claude` ancestor PID. This session key is passed as `?session_key=<pid>` on the WebSocket upgrade, so the daemon can maintain per-session state.
+**Bidirectional forwarding.** Two goroutines share one WebSocket connection: a scanner reads stdin and writes each line as a text frame; a reader reads frames from the daemon and writes them to stdout. The daemon can push unsolicited messages (e.g. `tools/list_changed`) at any time and they surface on stdout immediately.
 
-### Bidirectional Forwarding
+**Reconnect.** On disconnect (TCP loss, WebSocket close, or pong timeout) the proxy reconnects with exponential backoff, capped at five seconds. Stdin messages queued during the outage are preserved and delivered on the next connection. Status is printed to stderr.
 
-Two goroutines share one WebSocket connection:
+**Keepalive.** The proxy sends WebSocket pings at `MCP_PROXY_PING_INTERVAL`. If a pong does not arrive within `MCP_PROXY_PONG_TIMEOUT`, the connection is torn down and reconnect begins. This detects silent hangs — connections where TCP stays open but the daemon has stopped processing.
 
-1. **Scanner**: `bufio.Scanner` on stdin → `conn.Write()` to daemon
-2. **Reader**: `conn.Read()` from daemon → `fmt.Fprintf()` to stdout
+**Formal verification.** The bridge protocol has a [Z specification](docs/mcp-proxy.tex) verified by ProB model checking; the invariants and test partitions used in the Go tests are derived from it.
 
-The daemon can push unsolicited messages (e.g., `tools/list_changed`) at any time — they appear on stdout immediately.
+## Documentation
 
-### Message Format
-
-MCP over stdio uses newline-delimited JSON-RPC 2.0 (one JSON object per line). Over WebSocket, each line becomes one text frame. The proxy never parses JSON — messages pass through as opaque bytes.
-
-## Build
-
-```bash
-CGO_ENABLED=0 go build -o mcp-proxy .
-```
-
-Cross-compile for all platforms:
-
-```bash
-make dist         # Builds dist/mcp-proxy-{darwin,linux}-{arm64,amd64}
-```
+- [DESIGN.md](DESIGN.md) — decisions on transport selection, session identity, concurrency, and message format.
+- [docs/daemon-guide.md](docs/daemon-guide.md) — daemon-side integration guide.
+- [docs/distribution.md](docs/distribution.md) — release channels and platform binary layout.
+- [docs/mcp-proxy.tex](docs/mcp-proxy.tex) — Z specification of the bridge protocol.
+- [CHANGELOG.md](CHANGELOG.md) — release history.
 
 ## Development
 
 ```bash
-make check        # Run all quality gates (lint + docs + test)
+make check        # Full quality gate: vet, staticcheck, golangci-lint, govulncheck, markdownlint, race tests
 make lint         # go vet + staticcheck
+make lint-strict  # golangci-lint
+make vulncheck    # govulncheck
 make test         # go test -race -count=1 ./...
-make format       # gofmt -w .
 make cover        # Coverage report
-make help         # Show all targets
+make format       # gofmt -w .
+make build        # Local binary
+make dist         # Cross-compile for darwin/linux × arm64/amd64
 ```
-
-### Test Pyramid
-
-| Layer | Tag | What |
-|-------|-----|------|
-| Unit | (none) | Bridge forwarding, session resolution, transport errors |
-| Integration | `integration` | Real daemon roundtrips (quarry, biff) |
-| E2E | `e2e` | Compiled binary, black-box stdin/stdout piping |
-
-### Formal Verification
-
-The bridge protocol has a [Z specification](docs/mcp-proxy.tex) verified by ProB model checking (6 states, 43 transitions, all invariants hold). Test partitions are derived from the spec using TTF tactics.
-
-## Design
-
-See [DESIGN.md](DESIGN.md) for the decision log covering transport selection, session identity algorithm, concurrency model, and message format.
-
-<details>
-<summary>When does an MCP server need a proxy?</summary>
-
-A proxy makes sense when your MCP server has **expensive startup**, **heavy shared state**, **needs server push**, or **you want process isolation from Claude Code**:
-
-| Symptom | Without Proxy | With Proxy |
-|---------|--------------|------------|
-| ML model loading (embeddings, classifiers) | Every session loads the model (~200MB, ~2s) | Model loaded once, shared across sessions |
-| Database connection pools | N sessions = N pools | One pool, N lightweight proxies |
-| Singleton resources (audio device, display) | File lock contention between sessions | Single owner, proxy multiplexes access |
-| Server-initiated notifications | Not possible with stdio (client must poll) | Daemon pushes via WebSocket, proxy writes to stdout |
-| Memory leaks in MCP server | Leaks inside Claude Code's process tree | Leaks isolated to daemon process |
-| MCP server crash | Claude Code session dies | Proxy reconnects on disconnect; in-flight requests fail but session recovers |
-| MCP server hangs | Claude Code session freezes | Keepalive detects within 7s, proxy reconnects |
-| Hook scripts need daemon access | Heavy CLI imports blow 100ms hook budget | ~15ms Go binary relay via `--hook` |
-
-If your MCP server is stateless, starts in <100ms, and you don't use hooks that need daemon access, you don't need a proxy — direct stdio is simpler.
-
-</details>
-
-<details>
-<summary>Projects using mcp-proxy</summary>
-
-| Project | Shared State | Why Daemon |
-|---------|-------------|-----------|
-| [Quarry](https://github.com/punt-labs/quarry) | LanceDB index + ONNX embedding model | ~200MB memory, ~2s cold start |
-| [Biff](https://github.com/punt-labs/biff) | NATS relay connection | Persistent TCP, server push (`tools/list_changed`) |
-| [Vox](https://github.com/punt-labs/vox) | Audio output device | File lock, singleton resource |
-| [Lux](https://github.com/punt-labs/lux) | ImGui display server | Already centralized, interaction events |
-
-</details>
-
-<details>
-<summary>Prior art</summary>
-
-- **[SageOx](https://github.com/sageox/ox)** — Go CLI with per-workspace daemon over NDJSON Unix socket. Closest match. Request-response only (no push).
-- **[Beads](https://github.com/steveyegge/beads)** — Had a daemon, deleted 24K lines of it in v0.51.0. Replaced with Dolt for native multi-writer. Lesson: keep the proxy small.
-- **[Entire.io](https://github.com/entireio/cli)** — Stateless Go CLI. No daemon needed (filesystem-only state).
-
-</details>
 
 ## License
 
