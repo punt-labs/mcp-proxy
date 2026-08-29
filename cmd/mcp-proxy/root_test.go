@@ -10,6 +10,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/punt-labs/mcp-proxy/internal/config"
 )
 
 // parseOnly executes rootCmd against argv but replaces the RunE with a
@@ -228,6 +230,47 @@ func TestRootCmd_UnknownFlag(t *testing.T) {
 	err := root.Execute()
 	require.Error(t, err)
 	assert.True(t, isUsageError(err), "unknown flag must classify as usage error: %v", err)
+}
+
+// TestResolveURL exercises the three-tier precedence in isolation:
+// positional > config.URL > config.DefaultURL.
+func TestResolveURL(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		prof config.Profile
+		want string
+	}{
+		{
+			"positional only",
+			[]string{"ws://cli"},
+			config.Profile{},
+			"ws://cli",
+		},
+		{
+			"config only",
+			nil,
+			config.Profile{URL: "ws://config"},
+			"ws://config",
+		},
+		{
+			"positional beats config",
+			[]string{"ws://cli"},
+			config.Profile{URL: "ws://config"},
+			"ws://cli",
+		},
+		{
+			"default when neither set",
+			nil,
+			config.Profile{},
+			config.DefaultURL,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, resolveURL(tc.args, tc.prof))
+		})
+	}
 }
 
 // TestRootCmd_CobraArgsErrors pins cobra's positional-args predicates to

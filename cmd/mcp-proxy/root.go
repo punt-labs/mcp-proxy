@@ -121,38 +121,25 @@ func dispatch(ctx context.Context, f *flags, configSet bool, args []string, stdi
 		return &usageError{msg: "--config requires a non-empty profile name"}
 	}
 
-	positionalURL := ""
-	if len(args) == 1 {
-		positionalURL = args[0]
-	}
-
 	// The old parser required a URL positional or --config for every mode.
 	// Keep that contract so `mcp-proxy` with no args exits 2, not runProxy
 	// against the default URL.
-	if positionalURL == "" && f.profile == "" {
+	if len(args) == 0 && f.profile == "" {
 		return &usageError{msg: "daemon URL required (or use --config)"}
 	}
 
-	var extraHeaders map[string]string
-	var caCert string
-	configURL := ""
+	var prof config.Profile
 	if f.profile != "" {
-		prof, err := config.Load(f.profile)
+		p, err := config.Load(f.profile)
 		if err != nil {
 			return err
 		}
-		configURL = prof.URL
-		extraHeaders = prof.Headers
-		caCert = prof.CACert
+		prof = p
 	}
 
-	daemonURL := positionalURL
-	if daemonURL == "" {
-		daemonURL = configURL
-	}
-	if daemonURL == "" {
-		daemonURL = config.DefaultURL
-	}
+	daemonURL := resolveURL(args, prof)
+	extraHeaders := prof.Headers
+	caCert := prof.CACert
 
 	switch {
 	case f.health:
@@ -162,6 +149,19 @@ func dispatch(ctx context.Context, f *flags, configSet bool, args []string, stdi
 	default:
 		return runProxy(daemonURL, extraHeaders, caCert, stdin, stdout, stderr)
 	}
+}
+
+// resolveURL applies the three-tier precedence: positional arg beats
+// config.URL beats config.DefaultURL. Pure so it can be table-tested in
+// isolation without a running daemon or a temp config file.
+func resolveURL(args []string, prof config.Profile) string {
+	if len(args) == 1 && args[0] != "" {
+		return args[0]
+	}
+	if prof.URL != "" {
+		return prof.URL
+	}
+	return config.DefaultURL
 }
 
 // helpTemplate produces plain-text --help output — no colour, no markdown,
