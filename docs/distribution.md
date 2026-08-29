@@ -17,19 +17,17 @@ Each release also carries a `checksums.txt` with SHA-256 sums. `make dist` cross
 
 ### `curl | sh` (recommended)
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/punt-labs/mcp-proxy/main/install.sh | sh
-```
+The canonical install command lives in the [README's Quick Start](../README.md#quick-start) and is pinned to the latest release commit. Do not copy an install command from this doc into other repositories — always refer downstream users at the README so they pick up the current pin.
 
 `install.sh` detects the platform, downloads the matching binary from the latest GitHub Release, drops it in `~/.local/bin/mcp-proxy`, and adds a `PATH` hint if needed.
 
 ### `go install`
 
 ```bash
-go install github.com/punt-labs/mcp-proxy@latest
+go install github.com/punt-labs/mcp-proxy/cmd/mcp-proxy@latest
 ```
 
-Works out of the box — module path is `github.com/punt-labs/mcp-proxy` with `main.go` at the repo root. Requires a Go toolchain matching the module's `toolchain` directive.
+Module path is `github.com/punt-labs/mcp-proxy` with the binary entry point under `cmd/mcp-proxy/`; requires a Go toolchain matching the module's `toolchain` directive. Callers on v0.4.x and earlier used `go install github.com/punt-labs/mcp-proxy@latest` (main package at the repo root); that path stopped working when v0.5.0 moved the entry point under `cmd/mcp-proxy/` (DES-017).
 
 ### Manual download
 
