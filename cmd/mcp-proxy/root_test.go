@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -137,34 +136,44 @@ func TestRootCmd_ParseOrderIndependence(t *testing.T) {
 // error must satisfy errors.As(&*usageError).
 func TestDispatch_UsageErrors(t *testing.T) {
 	tests := []struct {
-		name   string
-		flags  flags
-		args   []string
-		fsKeys map[string]bool // simulates fs.Changed for the empty --config case
+		name      string
+		flags     flags
+		args      []string
+		configSet bool
 	}{
-		{"async without hook", flags{hookAsync: true}, []string{"ws://x"}, nil},
-		{"health and hook", flags{health: true, hookEvent: "e"}, []string{"ws://x"}, nil},
-		{"health no url no config", flags{health: true}, nil, nil},
-		{"hook no url no config", flags{hookEvent: "e"}, nil, nil},
-		{"no url no config", flags{}, nil, nil},
-		{"empty config", flags{}, []string{"ws://x"}, map[string]bool{"config": true}},
-		{"version with url", flags{showVersion: true}, []string{"ws://x"}, nil},
-		{"version with config", flags{showVersion: true, profile: "quarry"}, nil, nil},
-		{"version with health", flags{showVersion: true, health: true}, nil, nil},
+		{"async without hook", flags{hookAsync: true}, []string{"ws://x"}, false},
+		{"health and hook", flags{health: true, hookEvent: "e"}, []string{"ws://x"}, false},
+		{"health no url no config", flags{health: true}, nil, false},
+		{"hook no url no config", flags{hookEvent: "e"}, nil, false},
+		{"no url no config", flags{}, nil, false},
+		{"version with url", flags{showVersion: true}, []string{"ws://x"}, false},
+		{"version with config", flags{showVersion: true, profile: "quarry"}, nil, false},
+		{"version with health", flags{showVersion: true, health: true}, nil, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
-			if tc.fsKeys != nil {
-				ctx = withFakeFlagSet(ctx, tc.fsKeys)
-			}
 			var stdout, stderr bytes.Buffer
-			err := dispatch(ctx, &tc.flags, tc.args, strings.NewReader(""), &stdout, &stderr)
+			err := dispatch(context.Background(), &tc.flags, tc.configSet, tc.args, strings.NewReader(""), &stdout, &stderr)
 			require.Error(t, err)
 			var ue *usageError
 			assert.True(t, errors.As(err, &ue), "expected usageError, got %T: %v", err, err)
 		})
 	}
+}
+
+// TestRootCmd_EmptyConfig drives the empty --config="" guard through the
+// real cobra tree. Cannot be exercised via dispatch() alone because the
+// "was --config explicitly set" bit lives on cmd.Flags().
+func TestRootCmd_EmptyConfig(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	root, _ := newRootCmd(strings.NewReader(""), &stdout, &stderr)
+	root.SetArgs([]string{"--config", "", "ws://x"})
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
+	err := root.Execute()
+	require.Error(t, err)
+	assert.True(t, isUsageError(err), "empty --config must classify as usage error: %v", err)
+	assert.Contains(t, err.Error(), "non-empty profile")
 }
 
 // TestRootCmd_Version verifies both the --version flag and the version
@@ -219,36 +228,4 @@ func TestRootCmd_UnknownFlag(t *testing.T) {
 	err := root.Execute()
 	require.Error(t, err)
 	assert.True(t, isUsageError(err), "unknown flag must classify as usage error: %v", err)
-}
-
-// TestIsUsageError_PflagPrefixes pins each pflag error class to the
-// usage-error path. Without this, a pflag internals rename would
-// silently route flag-parse failures to exit 1.
-func TestIsUsageError_PflagPrefixes(t *testing.T) {
-	msgs := []string{
-		"unknown flag: --foo",
-		"unknown shorthand flag: 'x' in -x",
-		"flag needs an argument: --hook",
-		"invalid argument \"abc\" for \"--async\"",
-		"bad flag syntax: -=",
-	}
-	for _, m := range msgs {
-		assert.True(t, isUsageError(errors.New(m)), "should be usage error: %q", m)
-	}
-	assert.False(t, isUsageError(errors.New("dial tcp: connection refused")))
-}
-
-// withFakeFlagSet returns a context carrying a real pflag.FlagSet with
-// the named flags pre-marked as Changed(). This is the path the
-// dispatch's --config="" guard reads through cobraFlagChanged.
-func withFakeFlagSet(ctx context.Context, keys map[string]bool) context.Context {
-	fs := pflag.NewFlagSet("test", pflag.ContinueOnError)
-	for name := range keys {
-		var s string
-		fs.StringVar(&s, name, "", "")
-		if keys[name] {
-			require.NoError(nil, fs.Set(name, "")) //nolint:errcheck // best-effort test setup
-		}
-	}
-	return context.WithValue(ctx, flagSetKey{}, fs)
 }

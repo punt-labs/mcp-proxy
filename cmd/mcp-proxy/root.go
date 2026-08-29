@@ -6,7 +6,6 @@ import (
 	"io"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 
 	"github.com/punt-labs/mcp-proxy/internal/config"
 )
@@ -20,10 +19,6 @@ type flags struct {
 	hookAsync   bool
 	showVersion bool
 }
-
-// flagSetKey stashes the *pflag.FlagSet on the cobra context so dispatch
-// can query fs.Changed for the empty-string --config edge case.
-type flagSetKey struct{}
 
 // newRootCmd builds the root cobra command. stdin/out/err are captured so
 // tests can inject buffers; production callers pass os.Stdin/Stdout/Stderr.
@@ -41,7 +36,7 @@ The default mode is the long-running MCP bridge: JSON-RPC on stdin/stdout
 is forwarded to the daemon over WebSocket. --health performs a one-shot
 liveness dial. --hook forwards a single event payload from stdin to the
 daemon's /hook endpoint.`,
-		Args:          cobra.MaximumNArgs(1),
+		Args:          maxOneURL,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		Example: `  mcp-proxy ws://localhost:8420/mcp
@@ -51,7 +46,8 @@ daemon's /hook endpoint.`,
   mcp-proxy ws://localhost:8420 --hook PreToolUse < payload.json
   mcp-proxy --config quarry --hook --async SessionEnd < payload.json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return dispatch(cmd.Context(), f, args, stdin, stdout, stderr)
+			configSet := cmd.Flags().Changed("config")
+			return dispatch(cmd.Context(), f, configSet, args, stdin, stdout, stderr)
 		},
 	}
 
@@ -67,12 +63,7 @@ daemon's /hook endpoint.`,
 	fs.BoolVar(&f.showVersion, "version", false,
 		"Print the version and exit")
 
-	// Stash the flagset on the context so dispatch can query fs.Changed
-	// for the empty-string --config edge case (design §7).
-	cmd.PersistentPreRun = func(cmd *cobra.Command, _ []string) {
-		ctx := context.WithValue(cmd.Context(), flagSetKey{}, fs)
-		cmd.SetContext(ctx)
-	}
+	cmd.SetFlagErrorFunc(wrapFlagError)
 
 	cmd.SetUsageTemplate(usageTemplate)
 	cmd.SetHelpTemplate(helpTemplate)
@@ -82,10 +73,34 @@ daemon's /hook endpoint.`,
 	return cmd, f
 }
 
+// maxOneURL is the root command's positional-args validator. It wraps
+// cobra.MaximumNArgs(1)'s error in *usageError so main() routes it to
+// exit 2 alongside pflag parse failures.
+func maxOneURL(cmd *cobra.Command, args []string) error {
+	if err := cobra.MaximumNArgs(1)(cmd, args); err != nil {
+		return &usageError{msg: err.Error()}
+	}
+	return nil
+}
+
+// wrapFlagError adapts pflag's parse errors into *usageError. Installed via
+// cobra.Command.SetFlagErrorFunc so main()'s isUsageError classifier stays
+// a single type-assertion rather than a string-prefix match.
+func wrapFlagError(_ *cobra.Command, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &usageError{msg: err.Error()}
+}
+
 // dispatch resolves the URL, validates flag interactions, and hands off
 // to the right execution mode. It never talks to the network directly —
 // every mode calls a helper that owns its own I/O and lifecycle.
-func dispatch(ctx context.Context, f *flags, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+//
+// configSet is cmd.Flags().Changed("config"), read at the RunE call site
+// where the *cobra.Command is in scope. dispatch takes it as a plain bool
+// so the function has no cobra dependency and stays trivially testable.
+func dispatch(ctx context.Context, f *flags, configSet bool, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if f.showVersion {
 		if f.profile != "" || f.health || f.hookEvent != "" || f.hookAsync || len(args) > 0 {
 			return &usageError{msg: "--version takes no other arguments"}
@@ -102,7 +117,7 @@ func dispatch(ctx context.Context, f *flags, args []string, stdin io.Reader, std
 	}
 
 	// pflag lets --config="" through silently; the old parser rejected it.
-	if f.profile == "" && cobraFlagChanged(ctx, "config") {
+	if f.profile == "" && configSet {
 		return &usageError{msg: "--config requires a non-empty profile name"}
 	}
 
@@ -147,15 +162,6 @@ func dispatch(ctx context.Context, f *flags, args []string, stdin io.Reader, std
 	default:
 		return runProxy(daemonURL, extraHeaders, caCert, stdin, stdout, stderr)
 	}
-}
-
-// cobraFlagChanged is a shim so dispatch can query pflag state without
-// carrying the *cobra.Command through helper signatures.
-func cobraFlagChanged(ctx context.Context, name string) bool {
-	if fs, ok := ctx.Value(flagSetKey{}).(*pflag.FlagSet); ok {
-		return fs.Changed(name)
-	}
-	return false
 }
 
 // helpTemplate produces plain-text --help output — no colour, no markdown,

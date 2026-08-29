@@ -93,31 +93,11 @@ type runtimeError struct {
 func (e *runtimeError) Error() string { return e.err.Error() }
 func (e *runtimeError) Unwrap() error { return e.err }
 
-// isUsageError reports whether err came from argv validation. pflag's own
-// parse failures (unknown flag, missing value, bad type) are also treated
-// as usage errors; anything else is a runtime error.
+// isUsageError reports whether err came from argv validation. Both pflag's
+// parse failures and cobra's positional-args mismatches are wrapped in
+// *usageError at their source (SetFlagErrorFunc, custom Args validators),
+// so a single type-assertion suffices.
 func isUsageError(err error) bool {
 	var ue *usageError
-	if errors.As(err, &ue) {
-		return true
-	}
-	// pflag emits plain fmt.Errorf values. Detect by prefix — brittle in
-	// principle but pinned by the §9 e2e regression test
-	// (mcp-proxy --nonsense exits 2).
-	msg := err.Error()
-	for _, prefix := range pflagErrorPrefixes {
-		if len(msg) >= len(prefix) && msg[:len(prefix)] == prefix {
-			return true
-		}
-	}
-	return false
-}
-
-var pflagErrorPrefixes = []string{
-	"unknown flag:",
-	"unknown shorthand flag:",
-	"flag needs an argument:",
-	"invalid argument",
-	"bad flag syntax:",
-	"no such flag",
+	return errors.As(err, &ue)
 }
