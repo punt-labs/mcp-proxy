@@ -137,6 +137,41 @@ func TestCLI_E2E_EmptyHook(t *testing.T) {
 	assert.Contains(t, stderr.String(), "hook requires")
 }
 
+// TestCLI_E2E_FlagShapedValues is the regression guard for pflag's
+// StringVar swallowing the following argv token — even when that token
+// starts with '-'. Without the flag-shape guards in dispatch,
+// `mcp-proxy --config --help` binds profile="--help", config.Load
+// silently falls back on ENOENT, and the caller lands in the reconnect
+// loop against DefaultURL — the same silent-bridge UX hang the cobra
+// migration was meant to eliminate.
+func TestCLI_E2E_FlagShapedValues(t *testing.T) {
+	bin := binaryPath(t)
+	tests := []struct {
+		name    string
+		argv    []string
+		wantSub string
+	}{
+		{"config swallows help", []string{"--config", "--help"}, "--config requires"},
+		{"config swallows health", []string{"--config", "--health"}, "--config requires"},
+		{"hook swallows help", []string{"--hook", "--help", "ws://x"}, "--hook requires"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(bin, tc.argv...)
+			var stdout, stderr testutil.SafeBuffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+
+			err := cmd.Run()
+			require.Error(t, err)
+			exitErr, ok := err.(*exec.ExitError)
+			require.True(t, ok, "expected ExitError, got %T", err)
+			assert.Equal(t, 2, exitErr.ExitCode(), "stderr: %s", stderr.String())
+			assert.Contains(t, stderr.String(), tc.wantSub)
+		})
+	}
+}
+
 // TestCLI_E2E_MissingConfigProfile documents the current behavior of
 // `mcp-proxy --config <does-not-exist> --health`: config.Load silently
 // falls back on ENOENT (config.go:66-70), URL resolves to DefaultURL,

@@ -72,10 +72,11 @@ func TestRewriteHookAsync(t *testing.T) {
 			// The rewriter swaps the first --hook --async pair; the
 			// second --async remains adjacent to the promoted --hook
 			// and pflag then binds it as --hook's string value,
-			// leaving SessionEnd as an unrecognised positional URL.
-			// The dial fails visibly — no silent behavior. The
+			// leaving SessionEnd as an unrecognized positional URL.
+			// dispatch's flag-shape guard rejects "--async" bound to
+			// --hook as a usage error — no silent behavior. The
 			// rewriter deliberately stays minimal; argv validation is
-			// pflag/cobra's job.
+			// pflag/cobra/dispatch's job.
 			"hook duplicate async event",
 			[]string{"--hook", "--async", "--async", "SessionEnd"},
 			[]string{"--async", "--hook", "--async", "SessionEnd"},
@@ -169,6 +170,14 @@ func TestDispatch_UsageErrors(t *testing.T) {
 		// caller gets a long-running bridge instead of a usage error.
 		{"empty hook", flags{}, []string{"ws://x"}, false, true},
 		{"empty hook with async", flags{hookAsync: true}, []string{"ws://x"}, false, true},
+		// pflag's StringVar happily binds a flag-shaped token as the
+		// value; without the flag-shape guard, `--config --help` reaches
+		// config.Load, silently falls back on ENOENT, and enters the
+		// reconnect loop against DefaultURL.
+		{"config swallows help", flags{profile: "--help"}, nil, true, false},
+		{"config swallows health", flags{profile: "--health"}, nil, true, false},
+		{"hook swallows help", flags{hookEvent: "--help"}, []string{"ws://x"}, false, true},
+		{"hook swallows unknown flag", flags{hookEvent: "-foo"}, []string{"ws://x"}, false, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

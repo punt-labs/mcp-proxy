@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -120,6 +121,14 @@ func dispatch(ctx context.Context, f *flags, configSet, hookSet bool, args []str
 	if f.hookEvent == "" && hookSet {
 		return &usageError{msg: "--hook requires an event name"}
 	}
+	// pflag's StringVar for --hook consumes the next argv token even when
+	// it starts with '-'. Without this guard, `mcp-proxy --hook --help`
+	// binds hookEvent="--help" and dispatches to hook mode with a
+	// nonsense event. The rewriteHookAsync pre-pass covers --async; every
+	// other flag-shaped value slips through.
+	if hookSet && strings.HasPrefix(f.hookEvent, "-") {
+		return &usageError{msg: fmt.Sprintf("--hook requires an event name; got flag-shaped %q", f.hookEvent)}
+	}
 	if f.hookAsync && f.hookEvent == "" {
 		return &usageError{msg: "--async requires --hook"}
 	}
@@ -127,6 +136,14 @@ func dispatch(ctx context.Context, f *flags, configSet, hookSet bool, args []str
 	// pflag lets --config="" through silently; the old parser rejected it.
 	if f.profile == "" && configSet {
 		return &usageError{msg: "--config requires a non-empty profile name"}
+	}
+	// Same flag-shape swallow as --hook: without this, `mcp-proxy --config
+	// --help` binds profile="--help", passes the config-name regex, and
+	// config.Load silently falls back on ENOENT — the caller lands in the
+	// reconnect loop against DefaultURL. Placed after the empty-string
+	// guard so --config "" still reports "non-empty".
+	if configSet && strings.HasPrefix(f.profile, "-") {
+		return &usageError{msg: fmt.Sprintf("--config requires a profile name; got flag-shaped %q", f.profile)}
 	}
 
 	// The old parser required a URL positional or --config for every mode.
@@ -195,7 +212,7 @@ Examples:
 Exit codes:
   0  Success
   1  Runtime error (dial failure, daemon error, unclean shutdown)
-  2  Usage error (unrecognised flag, missing required argument)
+  2  Usage error (unrecognized flag, missing required argument)
 `
 
 // usageTemplate is what cobra prints on a parse error. Kept short because
