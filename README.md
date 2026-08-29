@@ -65,7 +65,7 @@ Then point Claude Code at the proxy instead of the direct MCP server:
 ```json
 {
   "mcpServers": {
-    "quarry": {
+    "example": {
       "type": "stdio",
       "command": "mcp-proxy",
       "args": ["ws://localhost:8420/mcp"]
@@ -106,16 +106,16 @@ In proxy mode, messages flow through as opaque bytes end-to-end. Two narrow exce
 Instead of passing a URL directly, store connection details in a profile:
 
 ```bash
-mcp-proxy --config quarry
+mcp-proxy --config example
 ```
 
-Reads `~/.punt-labs/mcp-proxy/quarry.toml`:
+Reads `~/.punt-labs/mcp-proxy/example.toml`:
 
 ```toml
-[quarry]
-url = "ws://okinos.user.home.lab:8420/mcp"
+[example]
+url = "wss://daemon.example.com:8420/mcp"
 
-[quarry.headers]
+[example.headers]
 Authorization = "Bearer <token>"
 ```
 

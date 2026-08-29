@@ -65,9 +65,9 @@ Use **WebSocket** (`github.com/coder/websocket`) for the proxy-to-daemon connect
 
 Three constraints drove the decision:
 
-1. **Bidirectional push is required.** Biff needs `tools/list_changed` push notifications. Lux needs interaction event push. HTTP cannot deliver unsolicited messages.
+1. **Bidirectional push is required.** A subset of MCP daemons need to push server-initiated messages (`tools/list_changed`, progress notifications, interaction events). HTTP cannot deliver unsolicited messages.
 2. **Built-in framing and keepalive.** WebSocket provides RFC 6455 message framing and ping/pong keepalive. Raw Unix sockets require DIY framing (~20 lines) and DIY keepalive (~20 lines) — small but must be correct.
-3. **Existing HTTP servers.** Quarry and biff already have `serve` commands with HTTP servers. WebSocket adds as an upgrade endpoint on the same server — one port serves both HTTP clients (quarry-menubar) and WebSocket proxy connections.
+3. **Composes with an existing HTTP server.** A daemon that already has an HTTP server (`serve` subcommand, health endpoint, etc.) can add a WebSocket upgrade on the same port. One port serves HTTP clients and WebSocket proxy connections.
 
 ### Rejected: HTTP
 
@@ -91,11 +91,11 @@ WebSocket requires a third-party Go library (`github.com/coder/websocket` — no
 
 ### Design
 
-Port biff's `find_session_key()` algorithm: parse `ps -eo pid=,ppid=,comm=`, walk upward from the proxy's PID, return the PID of the **topmost** `claude` ancestor. Pass the session key as `?session_key=<pid>` on the WebSocket upgrade request.
+Parse `ps -eo pid=,ppid=,comm=`, walk upward from the proxy's PID, and return the PID of the **topmost** `claude` ancestor. Pass the session key as `?session_key=<pid>` on the WebSocket upgrade request.
 
 ### Why
 
-The proxy is always a direct descendant of Claude Code (spawned as an MCP stdio subprocess). The topmost `claude` ancestor is the stable session identity — not the nearest, because Claude spawns child `claude` processes. This is a direct port of biff's DES-011/011a algorithm, proven in production.
+The proxy is always a direct descendant of Claude Code (spawned as an MCP stdio subprocess). The topmost `claude` ancestor is the stable session identity — not the nearest, because Claude spawns child `claude` processes.
 
 ### Why Topmost
 
@@ -289,53 +289,6 @@ This is the standard Go pattern — `kubectl`, `docker`, and most Go CLI tools u
 
 ---
 
-## Target Daemon Migration Notes
-
-### Quarry (`quarry serve`) — easiest migration
-
-`quarry serve` (stdlib HTTP) already exists. Each `quarry mcp` session currently loads its own LanceDB index and ONNX embedding model. The daemon shares one index and one model across all sessions.
-
-**Complications:**
-
-- **Database switching.** The `use` tool switches the active database — currently per-process state. Must become per-session (keyed by proxy session identity).
-- **Fire-and-forget.** Side-effect tools (ingest, delete, sync) return optimistic responses and process in a background `ThreadPoolExecutor`. Daemon preserves this; with bidirectional transport, can optionally push completion notifications.
-- **MCP `instructions` field.** Proxy must forward the daemon's `initialize` response (which includes formatting guidance) without modification.
-
-### Biff (`biff serve`) — hardest migration
-
-`biff serve` exists with both stdio and HTTP transports. The entire architecture revolves around per-session state: `{user}:{tty}` session key (DES-002), unread counts, talk partner, mesg mode, plan text.
-
-**Complications:**
-
-- **`tools/list_changed` push.** Background poller fires notifications when unread counts change. With HTTP, this is unsolvable without workarounds. **With WebSocket, solved** — daemon pushes down the session's persistent connection.
-- **PPID-keyed unread files.** Status line reads `~/.biff/unread/{ppid}.json`. Daemon writes these keyed by the Claude PID received from the proxy. Actually *fixes* DES-011b.
-- **Dynamic tool descriptions.** Per-session tool description mutation (unread count, talk partner). Persistent connection makes this natural — daemon knows which session is asking.
-- **Belt-and-suspenders simplification.** Current two-path notification design (tool-handler "belt" + background-poller "suspenders") collapses to one: poller → daemon → session connection → proxy → stdout.
-- **Session cleanup.** Currently deletes PPID file on shutdown. With persistent connection, cleanup triggers on proxy disconnect (detected via keepalive timeout).
-- **Session lifetime vs connection lifetime.** Biff's DES-008 requires 30-day session persistence. Session state persists in the relay (NATS KV / filesystem); the proxy connection is a transient delivery channel, not the session's lifetime.
-
-### Vox (new daemon needed)
-
-No `serve` command exists. Must be built. Currently uses `flock` on `~/.punt-vox/playback.lock` for cross-session audio serialization.
-
-**Complications:**
-
-- **Audio queue replaces flock.** Daemon manages one in-process FIFO queue — strictly simpler than file locking. But hooks (`notify.sh`, `notify-permission.sh`) currently call `vox play` directly. The CLI must forward to the daemon for playback.
-- **Hook call path change.** DES-017: hooks call CLI directly (~110ms). Path becomes hook → CLI → daemon → playback instead of hook → CLI → direct playback.
-- **Per-session config.** `.vox/config.md` is per-project. Proxy passes project directory at connection time.
-
-### Lux (`lux display` + `lux serve`)
-
-Display server already exists as a persistent Unix socket server (length-prefixed JSON, DES-002/003). MCP server (`lux serve`) is per-session, bridging MCP to the display protocol.
-
-**Complications:**
-
-- **Protocol mismatch.** Display server speaks its own protocol, not MCP JSON-RPC. `lux serve` becomes the shared daemon, bridging MCP to the display's native protocol.
-- **Bidirectional events.** Display pushes interaction events (clicks, slider changes). With persistent connection, daemon pushes to the correct proxy immediately — eliminates `recv()` polling.
-- **Scene ownership.** Multiple sessions showing content simultaneously. Session identity auto-scopes content to per-session tabs.
-
----
-
 ## DES-009: Reconnect on Daemon Disconnect
 
 **Date:** 2026-03-12
@@ -401,11 +354,11 @@ The `internal/bridge` package remains unchanged — it's still the right primiti
 
 ### Why
 
-Three consumers need daemon liveness checks:
+Three call sites need daemon liveness checks:
 
-1. **`quarry doctor`** — health check in CLI diagnostics
-2. **launchd `KeepAlive`** — restart daemon if not responding
-3. **CI** — verify daemon is running before test suite
+1. **Daemon `doctor` commands** — health check embedded in a CLI diagnostics subcommand.
+2. **launchd `KeepAlive` / systemd `ExecStartPre`** — restart the daemon if it stops responding.
+3. **CI** — verify a daemon is running before a test suite that depends on it.
 
 ### Rejected: Separate Health Check Binary
 
@@ -433,7 +386,7 @@ Claude Code hooks are shell scripts with brutal latency budgets:
 | `Notification` | unlimited | Async |
 | `SessionEnd` | unlimited | Async |
 
-Python import tax makes these budgets impossible to meet through normal CLI invocation: the daemon-owning full CLIs (biff, quarry) take seconds to import before their first line of user code runs. Even lightweight stdlib-only entry points still miss the 100ms budget by an order of magnitude. A static Go binary that opens one WebSocket connection is the right shape for hook-latency work.
+Python import tax makes these budgets impossible to meet through normal CLI invocation: a full daemon-owning Python CLI takes seconds to import before its first line of user code runs. Even lightweight stdlib-only entry points still miss the 100ms budget by an order of magnitude. A static Go binary that opens one WebSocket connection is the right shape for hook-latency work.
 
 ### Design
 
@@ -472,8 +425,8 @@ Async hooks send a JSON-RPC **notification** (no `id`). The proxy performs a gra
 ```bash
 #!/usr/bin/env bash
 [[ -f "$HOME/.punt-hooks-kill" ]] && exit 0
-# Fast gate: skip if not enabled for this project
-[[ -f "$REPO_ROOT/.biff" ]] || exit 0
+# Fast gate: skip if the caller has not opted in for this project
+[[ -f "$REPO_ROOT/.enabled" ]] || exit 0
 
 # Stdin from Claude Code passes through to daemon
 mcp-proxy ws://localhost:8080 --hook SessionStart
@@ -568,18 +521,11 @@ Hook connections set `conn.SetReadLimit(1024 * 1024)` (1MB), matching the MCP br
 
 ### What This Replaces
 
-Each daemon project currently maintains its own hook-latency workaround:
-
-| Project | Current approach | With hook relay |
-|---------|-----------------|----------------|
-| biff | `biff-hook` entry point, `_stdlib` modules | `mcp-proxy --hook`, well under the sync-hook budget |
-| quarry | Full CLI import (hooks not yet implemented) | `mcp-proxy --hook`, same |
-| vox | Shell-only hooks, limited capability | `mcp-proxy --hook`, same, full daemon access |
-| lux | Full CLI import (hooks not yet implemented) | `mcp-proxy --hook`, same |
+A daemon-owning CLI whose hook script imports the full CLI pays the cold-start tax on every hook invocation. `--hook` mode replaces that with a static Go binary that opens one WebSocket connection — well under any sync-hook budget the Claude Code framework enforces today.
 
 ### What This Does NOT Replace
 
-- **Shell-level decisions** (file existence checks, env var gates, kill switches) stay in bash. The proxy is for reaching the daemon, not for replacing `[[ -f .biff ]]`.
+- **Shell-level decisions** (file existence checks, env var gates, kill switches) stay in bash. The proxy is for reaching the daemon, not for replacing a project's own on/off gate file.
 - **The MCP bridge mode** (`mcp-proxy <url>` without `--hook`) is unchanged — long-running, bidirectional, reconnecting.
 - **Daemon-side hook handlers.** Each daemon must implement `hook/*` JSON-RPC methods. The proxy just delivers the messages.
 
@@ -623,7 +569,7 @@ Hook events fire at CLI-command frequency, not high-throughput rates. Under real
 
 ### Problem
 
-`io.ReadAll(stdin)` blocks until EOF. Claude Code pipes hook payloads to stdin but doesn't always close the pipe promptly — especially for `SessionStart` resume/compact events. This is the exact bug documented in biff DES-027, where `sys.stdin.read()` caused session resume to hang indefinitely.
+`io.ReadAll(stdin)` blocks until EOF. Claude Code pipes hook payloads to stdin but doesn't always close the pipe promptly — especially for `SessionStart` resume/compact events. A blocking `sys.stdin.read()` in a Python hook handler exhibits the same bug: the session-resume hook hangs indefinitely.
 
 ### Design
 
@@ -637,7 +583,7 @@ For readers without deadline support (e.g., `strings.Reader` in tests), falls ba
 
 ### Why These Timeouts
 
-Matches biff DES-027's proven values. In practice, Claude Code writes the payload in <1ms — the timeouts are safety nets for the pathological case. The worst-case overhead is 50ms (data arrives but no EOF), which is acceptable within hook budgets (100ms for PreToolUse).
+In practice, Claude Code writes the payload in <1ms — the timeouts are safety nets for the pathological case. The worst-case overhead is 50ms (data arrives but no EOF), which is acceptable within hook budgets (100ms for PreToolUse).
 
 ### Why Not a Goroutine
 
@@ -774,11 +720,10 @@ Stripping and re-adding works but is fragile if the daemon's hook endpoint ever 
 **Topic:** Replaying `initialize` / `notifications/initialized` after daemon reconnect
 **Bead:** mcp-lo3 (closed)
 **Implementation:** `internal/reconnect/handshake.go`
-**Downstream:** quarry-mddj
 
 ### Problem
 
-After a daemon restart, the proxy reconnects the WebSocket (DES-009) but never replays the MCP lifecycle handshake. Daemons that open a fresh `ServerSession` per connection (quarry, biff, vox) require `initialize` before answering tool calls. Claude Code sends `initialize` once at session start. Post-reconnect `tools/call` messages land on an uninitialized server and hang. User must restart Claude Code every time a daemon bounces.
+After a daemon restart, the proxy reconnects the WebSocket (DES-009) but never replays the MCP lifecycle handshake. Daemons that open a fresh `ServerSession` per connection require `initialize` before answering tool calls. Claude Code sends `initialize` once at session start. Post-reconnect `tools/call` messages land on an uninitialized server and hang. User must restart Claude Code every time the daemon bounces.
 
 ### Design
 
@@ -832,7 +777,7 @@ The cached `initialize` is replayed with the client's original `id`. Clients use
 
 Making daemons accept `initialize` on an already-initialized session would solve the problem without proxy changes. Rejected because:
 
-1. It requires changes to every daemon (quarry, biff, vox, lux) rather than one fix in the proxy.
+1. It requires changes to every downstream daemon rather than one fix in the proxy.
 2. The MCP Python SDK's `ServerSession` is not designed for re-initialization — making it idempotent requires forking or monkey-patching the SDK.
 3. The proxy is the correct layer: it owns connection lifecycle (DES-009) and already has a precedent for narrow protocol awareness (DES-011).
 
@@ -892,7 +837,7 @@ Effectively unmaintained (last release 2024, v2 archived). Adopting a decaying d
 
 ### Rejected: alecthomas/kong
 
-Struct-tag-driven flag parser; well-designed. Rejected on consistency: every other Punt Labs Go CLI (ethos, biff-relay, lux daemon shell) uses cobra. Divergence has an ongoing cost (reviewers, contributors, cross-repo scaffolding) not paid back by kong's smaller binary footprint.
+Struct-tag-driven flag parser; well-designed. Rejected on consistency: `punt-kit/standards/cli.md` names cobra as the canonical Go framework, and every other Punt Labs Go CLI uses it. Divergence has an ongoing cost (reviewers, contributors, cross-repo scaffolding) not paid back by kong's smaller binary footprint.
 
 ### Rejected: no subcommands at all (root-command-only cobra)
 
@@ -900,7 +845,7 @@ Considered as a fifth option. Rejected because cli.md:80-88 requires `version` a
 
 ### Rejected: `mcp-proxy run|health|hook` subcommands
 
-Cleanest cobra-idiomatic layout: one subcommand per mode. Rejected because every existing consumer (Claude Code MCP config, hook script patterns, DES-010 launchd integration) is pinned to the current argv shape. Migration would break each of them in the same release, requiring lock-step updates across quarry, biff, vox, lux, and every operator's unit file. Cleaner tree not worth the coordination cost.
+Cleanest cobra-idiomatic layout: one subcommand per mode. Rejected because every existing invocation shape (Claude Code MCP config, hook script patterns, DES-010 launchd integration) is pinned to the current argv. Migration would break every downstream consumer and operator unit file in the same release. Cleaner tree not worth the coordination cost.
 
 ### Trade-off accepted
 
@@ -921,9 +866,8 @@ Cleanest cobra-idiomatic layout: one subcommand per mode. Rejected because every
 
 1. ~~**Daemon auto-start.** Proxy starts daemon if missing, or always user's responsibility?~~ Settled: no auto-start (DES-005), but reconnect with backoff (DES-009) handles daemon restarts transparently.
 2. ~~**Graceful degradation.** Daemon down → fall back to in-process server, or fail fast?~~ Settled: reconnect with backoff (DES-009). No in-process fallback.
-3. **Lux daemon identity.** `lux serve` becomes the shared daemon, or MCP added to display server directly?
-4. ~~**Hook CLI forwarding.** `vox play` and `lux hook post-bash` — forward to daemon, or work independently?~~ Settled: forward to daemon via `--hook` relay mode (DES-011).
-5. ~~**WebSocket over Unix socket vs TCP.**~~ Settled by DES-001: WebSocket over TCP localhost. URLs are simpler (`ws://localhost:8420/mcp`), and TCP allows remote daemons (enabled by DES-007 bearer auth).
+3. ~~**Hook CLI forwarding.** Whether hook shell scripts should shell out to the daemon-owning CLI or reach the daemon directly.~~ Settled: reach the daemon directly via `--hook` relay mode (DES-011).
+4. ~~**WebSocket over Unix socket vs TCP.**~~ Settled by DES-001: WebSocket over TCP localhost. URLs are simpler (`ws://localhost:8420/mcp`), and TCP allows remote daemons (enabled by DES-007 bearer auth).
 
 ---
 
@@ -954,7 +898,7 @@ Chose NDJSON over length-prefix for debuggability: `echo '{"type":"ping"}' | soc
 
 **What they got right:** NDJSON debuggability. Per-workspace scoping. Heartbeat session tracking. Inactivity timeout. `NeedsHelp` pattern (daemon flags issues for LLM reasoning).
 
-**The push gap:** SageOx is request-response only — no persistent connections where the daemon pushes unsolicited messages. Works for sync status, but wouldn't work for biff's `tools/list_changed` or lux's interaction events.
+**The push gap:** SageOx is request-response only — no persistent connections where the daemon pushes unsolicited messages. Works for sync status, but wouldn't work for MCP server-initiated notifications (`tools/list_changed`, progress updates) or daemon-side interaction events.
 
 **Key difference:** SageOx's daemon is a separate IPC service alongside the MCP server. Ours *is* the MCP server — the proxy bridges stdio to it.
 

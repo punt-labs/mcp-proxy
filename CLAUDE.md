@@ -8,7 +8,7 @@ There is no such thing as a "pre-existing" issue. If you see a problem — in co
 
 ## Project State
 
-**Core implemented.** Bidirectional stdio-to-WebSocket bridge with session identity, debug logging, signal handling, automatic reconnect with backoff, health check, and hook relay mode. Integration tests blocked on quarry/biff WebSocket endpoints.
+**Core implemented.** Bidirectional stdio-to-WebSocket bridge with session identity, debug logging, signal handling, automatic reconnect with backoff, MCP handshake replay, WebSocket keepalive, health check, and hook relay mode. The proxy is transport-agnostic: it works against any daemon that speaks MCP JSON-RPC over a WebSocket endpoint.
 
 The binary is `mcp-proxy`. Invocation: `mcp-proxy <daemon-url>`. Health check: `mcp-proxy --health <daemon-url>`. Hook relay: `mcp-proxy <daemon-url> --hook <event>`.
 
@@ -31,7 +31,7 @@ The proxy is transparent — it doesn't know what MCP tools exist. JSON-RPC mess
 1. **Near-zero startup cost.** <10ms spawn, <10MB memory. Static Go binary.
 2. **Transparent JSON-RPC forwarding.** Forwards entire MCP protocol unchanged.
 3. **Session identity injection.** Resolves Claude session key via process tree and passes to daemon at connection time.
-4. **Single transport backend.** Bidirectional messaging (server push) required for biff and lux.
+4. **Single transport backend.** Bidirectional messaging (server-initiated notifications such as `notifications/tools/list_changed`, interaction events) requires a persistent connection.
 5. **Single binary, no dependencies.** Static binary per platform (darwin/arm64, darwin/amd64, linux/arm64, linux/amd64).
 6. **Daemon lifecycle is not the proxy's job.** Assumes daemon is running. Exits with clear error if can't connect.
 
@@ -76,7 +76,7 @@ mcp-proxy is a Go static binary that sits on the trust boundary between Claude C
 | CLI flag surface / hook relay UX | `mdm` | `rop` |
 | Cross-platform build matrix / static binary release | `adb` (Lovelace) | `bwk` |
 | Race-condition / concurrency review (`-race`) | `bwk` | `djb` |
-| Integration with daemon endpoints (biff, lux, quarry) | `bwk` | owning daemon's worker (e.g. `rmh` for lux/quarry, `mdm` for biff) |
+| Integration with a downstream daemon (its wire contract, session-key handling, hook endpoint) | `bwk` | the owning daemon's language specialist (`rmh` for Python daemons, `mdm` for Go, etc.) |
 
 Note: `bwk` (Kernighan) covers Go implementation; `rop` (Pike) and `mdm` (McIlroy) cover CLI/Unix surface and pipe correctness. For pure-Go internals, prefer `bwk` worker / `rop` evaluator. Use the `quick` pipeline for surgical bridge fixes; `standard` for any change touching the wire format or session-identity contract.
 
