@@ -27,7 +27,7 @@ Ranked by how often it drives a project to reach for the proxy:
 ## Quick Start
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/punt-labs/mcp-proxy/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/punt-labs/mcp-proxy/bdca3a6/install.sh | sh
 ```
 
 <details>
@@ -53,7 +53,7 @@ go install github.com/punt-labs/mcp-proxy/cmd/mcp-proxy@latest
 <summary>Inspect before running</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/punt-labs/mcp-proxy/main/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/punt-labs/mcp-proxy/bdca3a6/install.sh -o install.sh
 cat install.sh
 sh install.sh
 ```

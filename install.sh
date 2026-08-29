@@ -1,6 +1,9 @@
 #!/bin/sh
 # Install mcp-proxy — lightweight MCP stdio-to-daemon bridge.
-# Usage: curl -fsSL https://raw.githubusercontent.com/punt-labs/mcp-proxy/main/install.sh | sh
+# Usage: see README.md's Quick Start for the pinned-SHA install command.
+# Do not distribute this file's usage line with a `/main/` URL — pin to the
+# latest release commit so a stale copy of the script still fetches a
+# release-matched installer.
 set -eu
 
 # --- Colors (disabled when not a terminal) ---
