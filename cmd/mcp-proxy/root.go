@@ -27,8 +27,10 @@ type flagSetKey struct{}
 
 // newRootCmd builds the root cobra command. stdin/out/err are captured so
 // tests can inject buffers; production callers pass os.Stdin/Stdout/Stderr.
-func newRootCmd(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
-	var f flags
+// The returned *flags points at the same struct the command's RunE reads
+// from — tests can inspect it after Execute() to verify parsing.
+func newRootCmd(stdin io.Reader, stdout, stderr io.Writer) (*cobra.Command, *flags) {
+	f := &flags{}
 
 	cmd := &cobra.Command{
 		Use:   "mcp-proxy [flags] [daemon-url]",
@@ -49,7 +51,7 @@ daemon's /hook endpoint.`,
   mcp-proxy ws://localhost:8420 --hook PreToolUse < payload.json
   mcp-proxy --config quarry --hook --async SessionEnd < payload.json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return dispatch(cmd.Context(), &f, args, stdin, stdout, stderr)
+			return dispatch(cmd.Context(), f, args, stdin, stdout, stderr)
 		},
 	}
 
@@ -77,7 +79,7 @@ daemon's /hook endpoint.`,
 
 	cmd.AddCommand(newVersionCmd(stdout))
 
-	return cmd
+	return cmd, f
 }
 
 // dispatch resolves the URL, validates flag interactions, and hands off

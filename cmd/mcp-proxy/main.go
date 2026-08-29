@@ -28,7 +28,7 @@ func main() {
 //	1 runtime error (dial failure, daemon error, unclean shutdown)
 //	2 usage error (bad flag, missing required argument)
 func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	cmd := newRootCmd(stdin, stdout, stderr)
+	cmd, _ := newRootCmd(stdin, stdout, stderr)
 	cmd.SetArgs(rewriteHookAsync(argv))
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
