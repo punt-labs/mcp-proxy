@@ -907,6 +907,7 @@ Cleanest cobra-idiomatic layout: one subcommand per mode. Rejected because every
 - One new direct dependency (cobra); two new transitive dependencies (pflag, mousetrap-windows). All pure Go, all cgo-free. DES-014's `CGO_ENABLED=0` invariant is preserved.
 - Stripped-binary size on linux/amd64: **7,110,818 → 9,232,546 bytes** (+2,121,728, +29.8%). Larger than the design's 1.0-1.5 MiB estimate; still well within any distribution envelope. `file dist/mcp-proxy-linux-amd64` still reports "statically linked".
 - `go install github.com/punt-labs/mcp-proxy@latest` becomes `go install github.com/punt-labs/mcp-proxy/cmd/mcp-proxy@latest`. Documented in CHANGELOG and README.
+- The design noted a pflag-error string-prefix classifier as a brittle spot. The review-cycle fix replaced it with `cobra.Command.SetFlagErrorFunc` and custom `PositionalArgs` validators that wrap every parse or Args error in `*usageError` at source; `isUsageError` collapses to a single `errors.As` call and stops depending on pflag's message wording.
 
 ### Related
 
