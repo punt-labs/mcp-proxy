@@ -6,7 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `mcp-proxy version` subcommand. Prints `mcp-proxy <semver>` and exits 0.
+  `--version` continues to work identically. (mcp-proxy-6cx)
+
+### Changed
+
+- CLI is now built on [cobra](https://cobra.dev/) instead of a hand-rolled
+  `flag`-based parser. All existing argv shapes continue to work
+  (`mcp-proxy <url>`, `mcp-proxy --health <url>`,
+  `mcp-proxy <url> --hook <event>`, `mcp-proxy --config <profile>`, in
+  either order). See DES-017. (mcp-proxy-6cx)
+- Source layout: the CLI entry point moved from repo-root `main.go` to
+  `cmd/mcp-proxy/main.go`. Consumers who install from source must run
+  `go install github.com/punt-labs/mcp-proxy/cmd/mcp-proxy@latest`.
+  Binary consumers (release download, `install.sh`) are unaffected.
+- Stripped-binary size on linux/amd64 grew from **7,110,818 to
+  9,232,546 bytes** (+2,121,728, +29.8%) — cost of adding cobra + pflag.
+  `file dist/mcp-proxy-linux-amd64` still reports "statically linked".
+
 ### Fixed
+
+- `mcp-proxy --help` and `mcp-proxy -h` now print usage and exit 0.
+  Previously, `--help` was treated as a URL positional and the proxy
+  entered the reconnect loop. (mcp-proxy-6cx)
 
 - `.gitignore` no longer excludes `.claude/settings.json`. The bare `.claude/`
   directory rule excluded it outright, and git cannot re-include a file whose

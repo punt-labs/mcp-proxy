@@ -21,7 +21,7 @@ func binaryPath(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	binPath := dir + "/mcp-proxy"
-	cmd := exec.Command("go", "build", "-o", binPath, ".")
+	cmd := exec.Command("go", "build", "-o", binPath, "./cmd/mcp-proxy")
 	cmd.Dir = findModuleRoot(t)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "go build failed: %s", out)

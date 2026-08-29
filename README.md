@@ -41,6 +41,12 @@ chmod +x ~/.local/bin/mcp-proxy
 
 Substitute `darwin-arm64` for your platform: `darwin-amd64`, `linux-arm64`, `linux-amd64`. Ensure `~/.local/bin` is on your `PATH`.
 
+Or build from source:
+
+```bash
+go install github.com/punt-labs/mcp-proxy/cmd/mcp-proxy@latest
+```
+
 </details>
 
 <details>
@@ -70,7 +76,7 @@ Then point Claude Code at the proxy instead of the direct MCP server:
 
 ## Commands
 
-The binary has three modes, selected by flags. The daemon URL is supplied either as a positional argument or via `--config <profile>` (see [Configuration](#configuration)); a positional URL wins over the config's URL. In hook mode the URL and the `--hook <event>` flag can appear in either order.
+The binary has three modes, selected by flags. The daemon URL is supplied either as a positional argument or via `--config <profile>` (see [Configuration](#configuration)); a positional URL wins over the config's URL. In hook mode the URL and the `--hook <event>` flag can appear in either order. `mcp-proxy --help` prints the full flag reference and is the canonical source; the table below is a summary.
 
 | Invocation | What it does |
 |------------|--------------|
@@ -79,6 +85,8 @@ The binary has three modes, selected by flags. The daemon URL is supplied either
 | `mcp-proxy [<url>] --hook <event>` | Hook relay. Reads stdin, wraps it as `params` in a JSON-RPC request with method `hook/<event>`, and sends it to the daemon's `/hook` endpoint. Waits for the response and writes it to stdout. |
 | `mcp-proxy [<url>] --hook --async <event>` | Async hook relay. Same as above but sent as a notification (no `id`), and the proxy performs a graceful WebSocket close to guarantee delivery. |
 | `mcp-proxy --config <profile> [<url>]` | Read connection details (URL and headers) from `~/.punt-labs/mcp-proxy/<profile>.toml`. Combines with any of the modes above. |
+| `mcp-proxy --version` / `mcp-proxy version` | Print `mcp-proxy <semver>` and exit `0`. |
+| `mcp-proxy --help` / `mcp-proxy -h` | Print the full flag reference and exit `0`. |
 
 In proxy mode, messages flow through as opaque bytes end-to-end. Two narrow exceptions: on reconnect, the proxy replays the cached MCP `initialize` request and `notifications/initialized` notification (it inspects `method` and `id` on outgoing frames to cache them, but never touches `params`); in `--hook` mode, it validates that stdin is well-formed JSON, wraps it as the `params` field of a JSON-RPC envelope, and reads the response's `id` / `error` fields to route the reply and set the exit code.
 

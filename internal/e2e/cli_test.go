@@ -1,0 +1,194 @@
+//go:build e2e
+
+// Black-box tests for the CLI surface added in the cobra migration
+// (docs/cli-cobra.md §9). These invoke the compiled binary and assert
+// on stdout, stderr, and exit codes — not on internal flag state.
+package e2e_test
+
+import (
+	"os/exec"
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/punt-labs/mcp-proxy/internal/testutil"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// TestCLI_E2E_Help pins the fix for the pre-migration bug where --help
+// was treated as a URL positional and the reconnect loop entered.
+func TestCLI_E2E_Help(t *testing.T) {
+	bin := binaryPath(t)
+	for _, argv := range [][]string{{"--help"}, {"-h"}} {
+		t.Run(strings.Join(argv, " "), func(t *testing.T) {
+			cmd := exec.Command(bin, argv...)
+			var stdout, stderr testutil.SafeBuffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+
+			err := cmd.Run()
+			assert.NoError(t, err, "stderr: %s", stderr.String())
+			assert.Contains(t, stdout.String(), "Usage:")
+		})
+	}
+}
+
+// TestCLI_E2E_VersionFlag exercises `mcp-proxy --version`.
+func TestCLI_E2E_VersionFlag(t *testing.T) {
+	bin := binaryPath(t)
+	cmd := exec.Command(bin, "--version")
+	var stdout, stderr testutil.SafeBuffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	require.NoError(t, err, "stderr: %s", stderr.String())
+
+	matched, matchErr := regexp.MatchString(`^mcp-proxy \S+\n$`, stdout.String())
+	require.NoError(t, matchErr)
+	assert.True(t, matched, "unexpected --version output: %q", stdout.String())
+}
+
+// TestCLI_E2E_VersionSubcommand exercises `mcp-proxy version`.
+func TestCLI_E2E_VersionSubcommand(t *testing.T) {
+	bin := binaryPath(t)
+	cmd := exec.Command(bin, "version")
+	var stdout, stderr testutil.SafeBuffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	require.NoError(t, err, "stderr: %s", stderr.String())
+
+	matched, matchErr := regexp.MatchString(`^mcp-proxy \S+\n$`, stdout.String())
+	require.NoError(t, matchErr)
+	assert.True(t, matched, "unexpected `version` output: %q", stdout.String())
+}
+
+// TestCLI_E2E_UnknownFlag is the regression guard for the exit-code
+// split. pflag errors are wrapped in *usageError via SetFlagErrorFunc,
+// so the split rides on a single type assertion rather than a prefix
+// list.
+func TestCLI_E2E_UnknownFlag(t *testing.T) {
+	bin := binaryPath(t)
+	cmd := exec.Command(bin, "--nonsense")
+	var stdout, stderr testutil.SafeBuffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	require.Error(t, err)
+	exitErr, ok := err.(*exec.ExitError)
+	require.True(t, ok, "expected ExitError, got %T", err)
+	assert.Equal(t, 2, exitErr.ExitCode())
+	assert.Contains(t, stderr.String(), "unknown flag")
+}
+
+// TestCLI_E2E_CobraArgsErrors pins cobra's Args-predicate errors to
+// exit 2. Without wrapping cobra.MaximumNArgs / cobra.NoArgs in
+// *usageError at the source, each of these argv shapes wrongly exits 1.
+func TestCLI_E2E_CobraArgsErrors(t *testing.T) {
+	bin := binaryPath(t)
+	tests := []struct {
+		name    string
+		argv    []string
+		wantSub string
+	}{
+		{"root too many args", []string{"foo", "bar", "baz"}, "accepts at most"},
+		{"version flag with extras", []string{"--version", "foo", "bar"}, "accepts at most"},
+		{"version subcommand extra token", []string{"version", "extra-token"}, "unknown command"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(bin, tc.argv...)
+			var stdout, stderr testutil.SafeBuffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+
+			err := cmd.Run()
+			require.Error(t, err)
+			exitErr, ok := err.(*exec.ExitError)
+			require.True(t, ok, "expected ExitError, got %T", err)
+			assert.Equal(t, 2, exitErr.ExitCode(), "stderr: %s", stderr.String())
+			assert.Contains(t, stderr.String(), tc.wantSub)
+		})
+	}
+}
+
+// TestCLI_E2E_EmptyHook is the regression guard for the empty-hook
+// silent-bridge fallback: without the guard in dispatch, `--hook ""`
+// parses cleanly, hookEvent is empty, none of the mode guards fire,
+// and runProxy enters the reconnect loop against the daemon URL —
+// the caller gets a long-running bridge instead of the exit-2 usage
+// error they asked for.
+func TestCLI_E2E_EmptyHook(t *testing.T) {
+	bin := binaryPath(t)
+	cmd := exec.Command(bin, "--hook", "", "ws://127.0.0.1:1")
+	var stdout, stderr testutil.SafeBuffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	require.Error(t, err)
+	exitErr, ok := err.(*exec.ExitError)
+	require.True(t, ok, "expected ExitError, got %T", err)
+	assert.Equal(t, 2, exitErr.ExitCode(), "stderr: %s", stderr.String())
+	assert.Contains(t, stderr.String(), "hook requires")
+}
+
+// TestCLI_E2E_FlagShapedValues is the regression guard for pflag's
+// StringVar swallowing the following argv token — even when that token
+// starts with '-'. Without the flag-shape guards in dispatch,
+// `mcp-proxy --config --help` binds profile="--help", config.Load
+// silently falls back on ENOENT, and the caller lands in the reconnect
+// loop against DefaultURL — the same silent-bridge UX hang the cobra
+// migration was meant to eliminate.
+func TestCLI_E2E_FlagShapedValues(t *testing.T) {
+	bin := binaryPath(t)
+	tests := []struct {
+		name    string
+		argv    []string
+		wantSub string
+	}{
+		{"config swallows help", []string{"--config", "--help"}, "--config requires"},
+		{"config swallows health", []string{"--config", "--health"}, "--config requires"},
+		{"hook swallows help", []string{"--hook", "--help", "ws://x"}, "--hook requires"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(bin, tc.argv...)
+			var stdout, stderr testutil.SafeBuffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+
+			err := cmd.Run()
+			require.Error(t, err)
+			exitErr, ok := err.(*exec.ExitError)
+			require.True(t, ok, "expected ExitError, got %T", err)
+			assert.Equal(t, 2, exitErr.ExitCode(), "stderr: %s", stderr.String())
+			assert.Contains(t, stderr.String(), tc.wantSub)
+		})
+	}
+}
+
+// TestCLI_E2E_MissingConfigProfile documents the current behavior of
+// `mcp-proxy --config <does-not-exist> --health`: config.Load silently
+// falls back on ENOENT (config.go:66-70), URL resolves to DefaultURL,
+// and the health dial fails against the unreachable default. Exit 1.
+// If the operator wants missing profiles to be fatal, that is a
+// separate ADR — this test pins today's shape.
+func TestCLI_E2E_MissingConfigProfile(t *testing.T) {
+	bin := binaryPath(t)
+	cmd := exec.Command(bin, "--config", "nope-does-not-exist", "--health")
+	var stdout, stderr testutil.SafeBuffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	require.Error(t, err)
+	exitErr, ok := err.(*exec.ExitError)
+	require.True(t, ok, "expected ExitError, got %T", err)
+	assert.Equal(t, 1, exitErr.ExitCode(), "stderr: %s", stderr.String())
+	assert.Contains(t, stderr.String(), "health check failed")
+}

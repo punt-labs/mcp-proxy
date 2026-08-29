@@ -32,7 +32,7 @@ format: ## Format code
 	gofmt -w .
 
 build: ## Build binary
-	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o mcp-proxy .
+	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o mcp-proxy ./cmd/mcp-proxy
 
 install: build ## Install binary to ~/.local/bin
 	install -d ~/.local/bin
@@ -44,10 +44,10 @@ clean: ## Remove build artifacts
 
 dist: clean ## Cross-compile for all platforms
 	mkdir -p dist
-	CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build -ldflags="$(LDFLAGS_DIST)" -o dist/mcp-proxy-darwin-arm64 .
-	CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build -ldflags="$(LDFLAGS_DIST)" -o dist/mcp-proxy-darwin-amd64 .
-	CGO_ENABLED=0 GOOS=linux   GOARCH=arm64 go build -ldflags="$(LDFLAGS_DIST)" -o dist/mcp-proxy-linux-arm64  .
-	CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -ldflags="$(LDFLAGS_DIST)" -o dist/mcp-proxy-linux-amd64  .
+	CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build -ldflags="$(LDFLAGS_DIST)" -o dist/mcp-proxy-darwin-arm64 ./cmd/mcp-proxy
+	CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build -ldflags="$(LDFLAGS_DIST)" -o dist/mcp-proxy-darwin-amd64 ./cmd/mcp-proxy
+	CGO_ENABLED=0 GOOS=linux   GOARCH=arm64 go build -ldflags="$(LDFLAGS_DIST)" -o dist/mcp-proxy-linux-arm64  ./cmd/mcp-proxy
+	CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -ldflags="$(LDFLAGS_DIST)" -o dist/mcp-proxy-linux-amd64  ./cmd/mcp-proxy
 
 cover: ## Test with coverage report
 	go test -cover -coverprofile=coverage.out ./...

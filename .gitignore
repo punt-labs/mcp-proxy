@@ -167,8 +167,8 @@ timeline.xctimeline
 *.toc
 
 # === Repo-specific ===
-# Binary
-mcp-proxy
+# Binary (anchored so it doesn't shadow cmd/mcp-proxy/).
+/mcp-proxy
 dist/
 
 # Test artifacts

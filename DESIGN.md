@@ -845,6 +845,78 @@ Making daemons accept `initialize` on an already-initialized session would solve
 
 ---
 
+## DES-017: CLI Framework — Cobra
+
+**Date:** 2026-08-29
+**Status:** SETTLED
+**Topic:** Migrate hand-rolled flag parsing to spf13/cobra
+**Bead:** mcp-proxy-6cx
+**Design:** [docs/cli-cobra.md](docs/cli-cobra.md)
+**Implementation:** `cmd/mcp-proxy/root.go`, `cmd/mcp-proxy/main.go`
+
+### Design
+
+Adopt `github.com/spf13/cobra` (v1.10.1) as mcp-proxy's CLI framework. The root command runs the MCP bridge with `Args: cobra.MaximumNArgs(1)`. `--health`, `--hook <event>`, `--async`, `--config <profile>`, `--version`, and `--help` are local flags on the root command. One Layer-2 subcommand (`version`) is added for standards alignment; every existing argv shape from the pre-migration CLI keeps working.
+
+Package layout moves from repo-root `main.go` to `cmd/mcp-proxy/` per `punt-kit/standards/go.md` module-layout rules; Makefile build paths update in the same PR.
+
+### Why
+
+Three drivers:
+
+1. **Standards alignment.** `punt-kit/standards/cli.md` mandates cobra for Go CLIs. mcp-proxy was the last Punt Labs Go binary on hand-rolled `flag`.
+2. **Bug fix.** The pre-migration parser treated `--help` as a URL and entered the reconnect loop (see `docs/cli-cobra.md` §1). Cobra fixes this for free.
+3. **Order-independence.** The old parser hand-emulated flag-anywhere positional handling (pre-migration `main.go:102-116`). Cobra's pflag layer does this natively — deletes a class of edge cases.
+
+Backward compatibility is preserved: every argv the pre-migration CLI accepted continues to parse to the same behavior. Exit codes 0/1/2 retain their exact contract via `SilenceErrors: true`, `SilenceUsage: true`, and a typed `usageError` sentinel in `main`.
+
+### Deviation from `cli.md:158-162` (Naked Root Runs the Bridge)
+
+The standard says "Running the binary without a subcommand prints help — do not default to a subcommand like `serve`." mcp-proxy deviates: `mcp-proxy <url>` runs the bridge with no subcommand at position 1. Justification (design §1): mcp-proxy is not a user-facing tool — it is spawned by Claude Code from a fixed `command: mcp-proxy` config and by hook shell scripts from a fixed argv. Requiring a subcommand at position 1 would break every downstream config on the disk. The standard's single-verb-tool allowance (cli.md:36-44) covers this case; documented here as an accepted deviation ratified by the operator.
+
+### Implementation-Time Discovery
+
+The design's §2 table asserted that the argv shape `--hook --async <event>` parses to `hook=<event>, async=true` under a StringVar `--hook`. Empirical check showed pflag greedily consumes `--async` as `--hook`'s value regardless of the `-` prefix. Fix: a 15-line `rewriteHookAsync` pre-parse that swaps `--hook --async` to `--async --hook` before cobra sees argv. Preserves every existing consumer's argv byte-for-byte; no custom Var type. Guarded by `TestHook_E2E_AsyncSuccess` and `TestRewriteHookAsync`.
+
+### Rejected: keep stdlib `flag`
+
+Falls behind the standard, misses the `--help` bug fix, and forces mcp-proxy to keep growing custom parser code as flags are added. The old parser was already 85 lines for six flag combinations; each new mode added another branch.
+
+### Rejected: urfave/cli
+
+Popular alternative to cobra. Rejected because `cli.md:130-133` names cobra as the canonical Go framework, and no evidence suggests urfave/cli's ergonomics buy anything cobra doesn't already provide for a single-command binary.
+
+### Rejected: alecthomas/kingpin
+
+Effectively unmaintained (last release 2024, v2 archived). Adopting a decaying dependency to save ~1 MiB of binary is a bad trade against DES-014's static-build invariant.
+
+### Rejected: alecthomas/kong
+
+Struct-tag-driven flag parser; well-designed. Rejected on consistency: every other Punt Labs Go CLI (ethos, biff-relay, lux daemon shell) uses cobra. Divergence has an ongoing cost (reviewers, contributors, cross-repo scaffolding) not paid back by kong's smaller binary footprint.
+
+### Rejected: no subcommands at all (root-command-only cobra)
+
+Considered as a fifth option. Rejected because cli.md:80-88 requires `version` as a subcommand for every Layer-2-compliant CLI; adding one subcommand costs nothing structural and lets future admin verbs (`doctor`, `install`) land without another framework migration.
+
+### Rejected: `mcp-proxy run|health|hook` subcommands
+
+Cleanest cobra-idiomatic layout: one subcommand per mode. Rejected because every existing consumer (Claude Code MCP config, hook script patterns, DES-010 launchd integration) is pinned to the current argv shape. Migration would break each of them in the same release, requiring lock-step updates across quarry, biff, vox, lux, and every operator's unit file. Cleaner tree not worth the coordination cost.
+
+### Trade-off accepted
+
+- One new direct dependency (cobra); two new transitive dependencies (pflag, mousetrap-windows). All pure Go, all cgo-free. DES-014's `CGO_ENABLED=0` invariant is preserved.
+- Stripped-binary size on linux/amd64: **7,110,818 → 9,232,546 bytes** (+2,121,728, +29.8%). Larger than the design's 1.0-1.5 MiB estimate; still well within any distribution envelope. `file dist/mcp-proxy-linux-amd64` still reports "statically linked".
+- `go install github.com/punt-labs/mcp-proxy@latest` becomes `go install github.com/punt-labs/mcp-proxy/cmd/mcp-proxy@latest`. Documented in CHANGELOG and README.
+- The design noted a pflag-error string-prefix classifier as a brittle spot. The review-cycle fix replaced it with `cobra.Command.SetFlagErrorFunc` and custom `PositionalArgs` validators that wrap every parse or Args error in `*usageError` at source; `isUsageError` collapses to a single `errors.As` call and stops depending on pflag's message wording.
+
+### Related
+
+- DES-010 — Health check flag (preserved verbatim)
+- DES-011 — Hook relay mode (preserved verbatim)
+- DES-014 — Static build enforcement (constrains dependency choice)
+
+---
+
 ## Open Questions
 
 1. ~~**Daemon auto-start.** Proxy starts daemon if missing, or always user's responsibility?~~ Settled: no auto-start (DES-005), but reconnect with backoff (DES-009) handles daemon restarts transparently.
