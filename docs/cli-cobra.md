@@ -1,6 +1,6 @@
 # CLI Migration to Cobra
 
-**Status:** proposed — awaiting operator ratification before implementation dispatch.
+**Status:** settled — ratified 2026-08-29, implemented under bead `mcp-proxy-6cx`.
 **Bead:** `mcp-proxy-6cx`
 **Mission:** `m-2026-08-28-012`
 
