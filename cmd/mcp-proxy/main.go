@@ -33,7 +33,15 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
 
-	err := cmd.Execute()
+	return reportError(cmd.Execute(), stderr)
+}
+
+// reportError maps a cobra Execute() result to a process exit code and
+// prints the appropriate diagnostic line to stderr. Extracted from run()
+// so the *silentError branch — which deliberately suppresses the leader's
+// "mcp-proxy: <err>" prefix because the underlying operation has already
+// written its own diagnostic — can be exercised in isolation.
+func reportError(err error, stderr io.Writer) int {
 	switch {
 	case err == nil:
 		return 0
