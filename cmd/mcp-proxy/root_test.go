@@ -229,3 +229,47 @@ func TestRootCmd_UnknownFlag(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, isUsageError(err), "unknown flag must classify as usage error: %v", err)
 }
+
+// TestRootCmd_CobraArgsErrors pins cobra's positional-args predicates to
+// the usage-error path. Without wrapping cobra.MaximumNArgs/cobra.NoArgs
+// in *usageError at the source, these three argv shapes wrongly exit 1
+// instead of 2.
+func TestRootCmd_CobraArgsErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		argv    []string
+		wantSub string
+	}{
+		{
+			"root too many args",
+			[]string{"foo", "bar", "baz"},
+			"accepts at most",
+		},
+		{
+			// Two extra positionals trip MaximumNArgs before RunE, so
+			// dispatch's own "--version takes no other arguments" guard
+			// never runs. The Args wrapper is what routes this to exit 2.
+			"version flag with extra positionals",
+			[]string{"--version", "foo", "bar"},
+			"accepts at most",
+		},
+		{
+			"version subcommand extra token",
+			[]string{"version", "extra-token"},
+			"unknown command",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			root, _ := newRootCmd(strings.NewReader(""), &stdout, &stderr)
+			root.SetArgs(tc.argv)
+			root.SetOut(&stdout)
+			root.SetErr(&stderr)
+			err := root.Execute()
+			require.Error(t, err)
+			assert.True(t, isUsageError(err), "must classify as usage error: %v", err)
+			assert.Contains(t, err.Error(), tc.wantSub)
+		})
+	}
+}

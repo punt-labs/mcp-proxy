@@ -67,8 +67,9 @@ func TestCLI_E2E_VersionSubcommand(t *testing.T) {
 }
 
 // TestCLI_E2E_UnknownFlag is the regression guard for the exit-code
-// split. If pflag's internal error format ever changes, this test
-// fails and the fix is a one-line update to pflagErrorPrefixes.
+// split. pflag errors are wrapped in *usageError via SetFlagErrorFunc,
+// so the split rides on a single type assertion rather than a prefix
+// list.
 func TestCLI_E2E_UnknownFlag(t *testing.T) {
 	bin := binaryPath(t)
 	cmd := exec.Command(bin, "--nonsense")
@@ -82,6 +83,37 @@ func TestCLI_E2E_UnknownFlag(t *testing.T) {
 	require.True(t, ok, "expected ExitError, got %T", err)
 	assert.Equal(t, 2, exitErr.ExitCode())
 	assert.Contains(t, stderr.String(), "unknown flag")
+}
+
+// TestCLI_E2E_CobraArgsErrors pins cobra's Args-predicate errors to
+// exit 2. Without wrapping cobra.MaximumNArgs / cobra.NoArgs in
+// *usageError at the source, each of these argv shapes wrongly exits 1.
+func TestCLI_E2E_CobraArgsErrors(t *testing.T) {
+	bin := binaryPath(t)
+	tests := []struct {
+		name    string
+		argv    []string
+		wantSub string
+	}{
+		{"root too many args", []string{"foo", "bar", "baz"}, "accepts at most"},
+		{"version flag with extras", []string{"--version", "foo", "bar"}, "accepts at most"},
+		{"version subcommand extra token", []string{"version", "extra-token"}, "unknown command"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(bin, tc.argv...)
+			var stdout, stderr testutil.SafeBuffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+
+			err := cmd.Run()
+			require.Error(t, err)
+			exitErr, ok := err.(*exec.ExitError)
+			require.True(t, ok, "expected ExitError, got %T", err)
+			assert.Equal(t, 2, exitErr.ExitCode(), "stderr: %s", stderr.String())
+			assert.Contains(t, stderr.String(), tc.wantSub)
+		})
+	}
 }
 
 // TestCLI_E2E_MissingConfigProfile documents the current behavior of
