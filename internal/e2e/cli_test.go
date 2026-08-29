@@ -116,6 +116,27 @@ func TestCLI_E2E_CobraArgsErrors(t *testing.T) {
 	}
 }
 
+// TestCLI_E2E_EmptyHook is the regression guard for the empty-hook
+// silent-bridge fallback: without the guard in dispatch, `--hook ""`
+// parses cleanly, hookEvent is empty, none of the mode guards fire,
+// and runProxy enters the reconnect loop against the daemon URL —
+// the caller gets a long-running bridge instead of the exit-2 usage
+// error they asked for.
+func TestCLI_E2E_EmptyHook(t *testing.T) {
+	bin := binaryPath(t)
+	cmd := exec.Command(bin, "--hook", "", "ws://127.0.0.1:1")
+	var stdout, stderr testutil.SafeBuffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	require.Error(t, err)
+	exitErr, ok := err.(*exec.ExitError)
+	require.True(t, ok, "expected ExitError, got %T", err)
+	assert.Equal(t, 2, exitErr.ExitCode(), "stderr: %s", stderr.String())
+	assert.Contains(t, stderr.String(), "hook requires")
+}
+
 // TestCLI_E2E_MissingConfigProfile documents the current behavior of
 // `mcp-proxy --config <does-not-exist> --health`: config.Load silently
 // falls back on ENOENT (config.go:66-70), URL resolves to DefaultURL,

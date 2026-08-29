@@ -47,7 +47,8 @@ daemon's /hook endpoint.`,
   mcp-proxy --config quarry --hook --async SessionEnd < payload.json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			configSet := cmd.Flags().Changed("config")
-			return dispatch(cmd.Context(), f, configSet, args, stdin, stdout, stderr)
+			hookSet := cmd.Flags().Changed("hook")
+			return dispatch(cmd.Context(), f, configSet, hookSet, args, stdin, stdout, stderr)
 		},
 	}
 
@@ -97,10 +98,11 @@ func wrapFlagError(_ *cobra.Command, err error) error {
 // to the right execution mode. It never talks to the network directly —
 // every mode calls a helper that owns its own I/O and lifecycle.
 //
-// configSet is cmd.Flags().Changed("config"), read at the RunE call site
-// where the *cobra.Command is in scope. dispatch takes it as a plain bool
-// so the function has no cobra dependency and stays trivially testable.
-func dispatch(ctx context.Context, f *flags, configSet bool, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+// configSet and hookSet are cmd.Flags().Changed("config") and
+// cmd.Flags().Changed("hook"), read at the RunE call site where the
+// *cobra.Command is in scope. dispatch takes them as plain bools so the
+// function has no cobra dependency and stays trivially testable.
+func dispatch(ctx context.Context, f *flags, configSet, hookSet bool, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if f.showVersion {
 		if f.profile != "" || f.health || f.hookEvent != "" || f.hookAsync || len(args) > 0 {
 			return &usageError{msg: "--version takes no other arguments"}
@@ -111,6 +113,12 @@ func dispatch(ctx context.Context, f *flags, configSet bool, args []string, stdi
 
 	if f.health && f.hookEvent != "" {
 		return &usageError{msg: "--health and --hook are mutually exclusive"}
+	}
+	// pflag lets --hook="" through silently; without this guard, an empty
+	// event name falls through to runProxy and the caller gets a silent
+	// long-running bridge instead of a usage error. Mirrors --config="".
+	if f.hookEvent == "" && hookSet {
+		return &usageError{msg: "--hook requires an event name"}
 	}
 	if f.hookAsync && f.hookEvent == "" {
 		return &usageError{msg: "--async requires --hook"}

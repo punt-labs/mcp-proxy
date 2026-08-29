@@ -155,20 +155,25 @@ func TestDispatch_UsageErrors(t *testing.T) {
 		flags     flags
 		args      []string
 		configSet bool
+		hookSet   bool
 	}{
-		{"async without hook", flags{hookAsync: true}, []string{"ws://x"}, false},
-		{"health and hook", flags{health: true, hookEvent: "e"}, []string{"ws://x"}, false},
-		{"health no url no config", flags{health: true}, nil, false},
-		{"hook no url no config", flags{hookEvent: "e"}, nil, false},
-		{"no url no config", flags{}, nil, false},
-		{"version with url", flags{showVersion: true}, []string{"ws://x"}, false},
-		{"version with config", flags{showVersion: true, profile: "quarry"}, nil, false},
-		{"version with health", flags{showVersion: true, health: true}, nil, false},
+		{"async without hook", flags{hookAsync: true}, []string{"ws://x"}, false, false},
+		{"health and hook", flags{health: true, hookEvent: "e"}, []string{"ws://x"}, false, false},
+		{"health no url no config", flags{health: true}, nil, false, false},
+		{"hook no url no config", flags{hookEvent: "e"}, nil, false, false},
+		{"no url no config", flags{}, nil, false, false},
+		{"version with url", flags{showVersion: true}, []string{"ws://x"}, false, false},
+		{"version with config", flags{showVersion: true, profile: "quarry"}, nil, false, false},
+		{"version with health", flags{showVersion: true, health: true}, nil, false, false},
+		// pflag lets --hook="" through silently; without the guard the
+		// caller gets a long-running bridge instead of a usage error.
+		{"empty hook", flags{}, []string{"ws://x"}, false, true},
+		{"empty hook with async", flags{hookAsync: true}, []string{"ws://x"}, false, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			err := dispatch(context.Background(), &tc.flags, tc.configSet, tc.args, strings.NewReader(""), &stdout, &stderr)
+			err := dispatch(context.Background(), &tc.flags, tc.configSet, tc.hookSet, tc.args, strings.NewReader(""), &stdout, &stderr)
 			require.Error(t, err)
 			var ue *usageError
 			assert.True(t, errors.As(err, &ue), "expected usageError, got %T: %v", err, err)
