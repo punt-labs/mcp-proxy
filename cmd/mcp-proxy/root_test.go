@@ -67,6 +67,19 @@ func TestRewriteHookAsync(t *testing.T) {
 			[]string{"ws://x", "--hook", "--async", "SessionEnd"},
 			[]string{"ws://x", "--async", "--hook", "SessionEnd"},
 		},
+		{
+			// Duplicated --async is user error, not silent-failure.
+			// The rewriter swaps the first --hook --async pair; the
+			// second --async remains adjacent to the promoted --hook
+			// and pflag then binds it as --hook's string value,
+			// leaving SessionEnd as an unrecognised positional URL.
+			// The dial fails visibly — no silent behavior. The
+			// rewriter deliberately stays minimal; argv validation is
+			// pflag/cobra's job.
+			"hook duplicate async event",
+			[]string{"--hook", "--async", "--async", "SessionEnd"},
+			[]string{"--async", "--hook", "--async", "SessionEnd"},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
