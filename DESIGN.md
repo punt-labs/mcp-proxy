@@ -65,7 +65,7 @@ Use **WebSocket** (`github.com/coder/websocket`) for the proxy-to-daemon connect
 
 Three constraints drove the decision:
 
-1. **Bidirectional push is required.** A subset of MCP daemons need to push server-initiated messages (`tools/list_changed`, progress notifications, interaction events). HTTP cannot deliver unsolicited messages.
+1. **Bidirectional push is required.** A subset of MCP daemons need to push server-initiated messages (`notifications/tools/list_changed`, progress notifications, interaction events). HTTP cannot deliver unsolicited messages.
 2. **Built-in framing and keepalive.** WebSocket provides RFC 6455 message framing and ping/pong keepalive. Raw Unix sockets require DIY framing (~20 lines) and DIY keepalive (~20 lines) — small but must be correct.
 3. **Composes with an existing HTTP server.** A daemon that already has an HTTP server (`serve` subcommand, health endpoint, etc.) can add a WebSocket upgrade on the same port. One port serves HTTP clients and WebSocket proxy connections.
 
@@ -898,7 +898,7 @@ Chose NDJSON over length-prefix for debuggability: `echo '{"type":"ping"}' | soc
 
 **What they got right:** NDJSON debuggability. Per-workspace scoping. Heartbeat session tracking. Inactivity timeout. `NeedsHelp` pattern (daemon flags issues for LLM reasoning).
 
-**The push gap:** SageOx is request-response only — no persistent connections where the daemon pushes unsolicited messages. Works for sync status, but wouldn't work for MCP server-initiated notifications (`tools/list_changed`, progress updates) or daemon-side interaction events.
+**The push gap:** SageOx is request-response only — no persistent connections where the daemon pushes unsolicited messages. Works for sync status, but wouldn't work for MCP server-initiated notifications (`notifications/tools/list_changed`, progress updates) or daemon-side interaction events.
 
 **Key difference:** SageOx's daemon is a separate IPC service alongside the MCP server. Ours *is* the MCP server — the proxy bridges stdio to it.
 

@@ -163,7 +163,7 @@ The Makefile is the source of truth for what `check` means (`make help` to see a
 
 - **Transparent forwarding**: JSON-RPC request in on stdin → forwarded to daemon → response back on stdout, byte-for-byte identical
 - **Session identity**: Process tree walking resolves correct session key
-- **Bidirectional push**: Daemon-initiated messages (e.g., `tools/list_changed`) forwarded to stdout
+- **Bidirectional push**: Daemon-initiated messages (e.g., `notifications/tools/list_changed`) forwarded to stdout
 - **Connection failure**: Clean error and exit when daemon unreachable
 - **Graceful shutdown**: Stdin EOF → clean disconnect from daemon
 
