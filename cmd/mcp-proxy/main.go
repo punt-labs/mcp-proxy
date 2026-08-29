@@ -42,8 +42,8 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprint(stderr, shortUsage)
 		return 2
 	default:
-		var rt *runtimeError
-		if errors.As(err, &rt) && rt.silent {
+		var se *silentError
+		if errors.As(err, &se) {
 			return 1
 		}
 		_, _ = fmt.Fprintf(stderr, "mcp-proxy: %v\n", err)
@@ -82,16 +82,13 @@ type usageError struct{ msg string }
 
 func (e *usageError) Error() string { return e.msg }
 
-// runtimeError optionally suppresses main()'s "mcp-proxy: <err>" line
-// when the underlying operation already wrote its own diagnostic
-// (e.g. hook.Run for ErrDaemonError).
-type runtimeError struct {
-	err    error
-	silent bool
-}
+// silentError suppresses main()'s "mcp-proxy: <err>" line when the
+// underlying operation has already written its own diagnostic to stderr
+// (e.g. hook.Run for ErrDaemonError). Exit code is still 1.
+type silentError struct{ err error }
 
-func (e *runtimeError) Error() string { return e.err.Error() }
-func (e *runtimeError) Unwrap() error { return e.err }
+func (e *silentError) Error() string { return e.err.Error() }
+func (e *silentError) Unwrap() error { return e.err }
 
 // isUsageError reports whether err came from argv validation. Both pflag's
 // parse failures and cobra's positional-args mismatches are wrapped in

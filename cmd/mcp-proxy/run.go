@@ -108,7 +108,7 @@ func runHook(rawURL, event string, async bool, extraHeaders map[string]string, c
 
 	if err := hook.Run(ctx, stdin, stdout, stderr, conn, event, async, logger); err != nil {
 		if errors.Is(err, hook.ErrDaemonError) {
-			return &runtimeError{err: err, silent: true}
+			return &silentError{err: err}
 		}
 		return err
 	}
