@@ -65,7 +65,7 @@ Then point Claude Code at the proxy instead of the direct MCP server:
 ```json
 {
   "mcpServers": {
-    "quarry": {
+    "example": {
       "type": "stdio",
       "command": "mcp-proxy",
       "args": ["ws://localhost:8420/mcp"]
@@ -106,16 +106,16 @@ In proxy mode, messages flow through as opaque bytes end-to-end. Two narrow exce
 Instead of passing a URL directly, store connection details in a profile:
 
 ```bash
-mcp-proxy --config quarry
+mcp-proxy --config example
 ```
 
-Reads `~/.punt-labs/mcp-proxy/quarry.toml`:
+Reads `~/.punt-labs/mcp-proxy/example.toml`:
 
 ```toml
-[quarry]
-url = "ws://okinos.user.home.lab:8420/mcp"
+[example]
+url = "wss://daemon.example.com:8420/mcp"
 
-[quarry.headers]
+[example.headers]
 Authorization = "Bearer <token>"
 ```
 
@@ -149,7 +149,7 @@ For a full daemon-side integration guide including WebSocket ping/pong library n
 
 **Session identity.** The proxy walks the process tree upward to find the topmost `claude` ancestor PID (`ps -eo pid=,ppid=,comm=`), then passes it as `?session_key=<pid>` on the WebSocket upgrade. A daemon can key per-session state off this value.
 
-**Bidirectional forwarding.** Two goroutines share one WebSocket connection: a scanner reads stdin and writes each line as a text frame; a reader reads frames from the daemon and writes them to stdout. The daemon can push unsolicited messages (e.g. `tools/list_changed`) at any time and they surface on stdout immediately.
+**Bidirectional forwarding.** Two goroutines share one WebSocket connection: a scanner reads stdin and writes each line as a text frame; a reader reads frames from the daemon and writes them to stdout. The daemon can push unsolicited messages (e.g. `notifications/tools/list_changed`) at any time and they surface on stdout immediately.
 
 **Reconnect.** On disconnect (TCP loss, WebSocket close, or pong timeout) the proxy reconnects with exponential backoff, capped at five seconds. Stdin messages queued during the outage are preserved and delivered on the next connection. Status is printed to stderr.
 
