@@ -47,6 +47,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Enforcement is unchanged: `Edit(.env)` and `Edit(.envrc)` remain and are what
   actually blocks writes to those files. (mcp-ptd)
 
+### Security
+
+- Go toolchain bumped from go1.26.6 to go1.26.10, fixing standard-library
+  advisories GO-2026-6809 (crypto/x509) and GO-2026-6617 (net/http) that
+  `govulncheck` flags in the shipped binary.
+
 ## [0.4.1] - 2026-04-09
 
 ### Fixed
