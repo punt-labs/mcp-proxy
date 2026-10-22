@@ -10,6 +10,7 @@
 .env*.local
 !.env.example
 .envrc.local
+.direnv
 .biff.local
 .claude/settings.local.json
 .claude/settings.local.*
@@ -25,18 +26,26 @@
 .punt-labs/**/local/**
 .punt-labs/**/*.local.*
 .punt-labs/quarry/captures/
+# Ethos vendored registry: sessions/ and mission lock files are per-run
+# runtime churn (0700 dirs / flocks), never committed. missions/ is NOT
+# blanket-ignored here -- vox's own .gitignore tracks durable mission
+# records (contract.yaml, results.yaml, reflections.yaml, log.jsonl)
+# under .punt-labs/ethos/missions/ by design; only its lock files are
+# runtime noise (the mission-wide .create.lock is already covered by the
+# global **/.create.lock below; missions/**/.lock catches a per-mission
+# lock at any nesting depth, not just one level down).
+#
+# The rollout script's dedup exempts .punt-labs/ethos/ specifically
+# (unlike vox/quarry/lux, this policy is genuinely per-repo, not
+# universal -- see gitignore-canonical-rollout.sh) so a repo's own
+# broader or narrower .punt-labs/ethos/* rule survives rollout untouched.
+# This entry is only the minimal shared baseline for repos with no
+# custom policy of their own.
+.punt-labs/ethos/sessions/
+.punt-labs/ethos/missions/**/.lock
 .punt-labs/vox/ephemeral/
 .punt-labs/vox/vox.local.md
 .punt-labs/lux.md
-
-# --- Vendored ethos registry: runtime state (regenerated per-machine) ---
-# The identity/role/personality/team subtree under .punt-labs/ethos/ is
-# vendored from punt-labs/team; only the registry is tracked, not the
-# per-session mission and biff state that ethos writes at runtime.
-.punt-labs/ethos/missions/
-.punt-labs/ethos/missions.jsonl
-.punt-labs/ethos/sessions/
-.punt-labs/ethos/.biff
 
 # --- Claude Code runtime state ---
 .claude/*
@@ -68,9 +77,12 @@
 .beads/.local_version
 
 # --- Scratch / temp ---
+# .tmp/ is the repo-local TMPDIR (set via .envrc). We keep the directory but
+# ignore its contents. Do NOT add a bare `*.tmp` pattern here — it would match
+# the `.tmp` directory itself, preventing git from descending, and then the
+# `!.tmp/.gitkeep` negation could not re-include the tracked marker.
 .tmp/*
 !.tmp/.gitkeep
-*.tmp
 CLAUDE.md.tmp
 
 # --- Worktrees ---
@@ -167,34 +179,10 @@ timeline.xctimeline
 *.toc
 
 # === Repo-specific ===
-# Binary (anchored so it doesn't shadow cmd/mcp-proxy/).
+# Binary (anchored so it does not shadow cmd/mcp-proxy/).
 /mcp-proxy
-dist/
 
-# Test artifacts
-coverage.out
-
-# OS
-.DS_Store
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# Temp
-
-# Claude Code (settings.json is tracked; everything else is local/runtime).
-# Use `.claude/*`, not `.claude/`: git cannot re-include a file whose parent
-# directory is excluded, so the `!` line below is dead against a bare `.claude/`.
-# But a mid-pattern slash anchors to this directory, so `.claude/*` covers only
-# the root one where bare `.claude/` covered every depth; `*/**/.claude/`
-# restores that. Nested .claude dirs hold settings.local.json, which carries
-# machine-local MCP config and absolute-path allow rules — never commit it.
-*/**/.claude/
-
-# Z tooling
+# Z tooling (docs/ build artifacts)
 docs/fuzz.sty
 docs/*.mf
 docs/*.pk
@@ -206,18 +194,13 @@ docs/*.toc
 docs/*.out
 docs/*.pdf
 
-# Local-only files (machine-specific, per-user)
-
 # Vox cached audio
 .vox/*.mp3
 docs/.vox/
 
-# Quarry session-transcript captures (pkit-kcps)
-
-# The mandated sibling lock every punt CLI takes before mutating a shared
-# host file (tool-enable-disable.md 2.4). Per-machine runtime state, and it
-# persists by design — unlinking a lock file races the next writer. The
-# pattern is broad because the lock's name is the host file's, and tools
-# differ on the suffix — .CLAUDE.md.lock and .CLAUDE.md.punt-import.lock
-# both appear.
-.*.lock
+# Ethos per-machine runtime state beyond the canonical baseline. Only the
+# registry is tracked; mission and biff state is regenerated per machine
+# (closed missions are exported to missions-closed/, which is not ignored).
+.punt-labs/ethos/missions/
+.punt-labs/ethos/missions.jsonl
+.punt-labs/ethos/.biff
