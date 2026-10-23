@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- biff is enabled for this repo (`.punt-labs/biff/enabled`). A new
+  `Biff CI Notifications` workflow (`.github/workflows/biff-notify.yml`) posts
+  a biff relay notification when a push-triggered Docs, Lint, Release, or Test
+  run fails. It uses the org `BIFF_RELAY_TOKEN` secret and `BIFF_RELAY_URL`
+  variable; pull-request runs and successful runs send nothing.
+
 ## [0.5.0] - 2026-10-22
 
 ### Added
