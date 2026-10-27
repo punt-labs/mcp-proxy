@@ -192,6 +192,8 @@ bd sync                               # push to remote
 
 PR review follows punt-kit/standards/pr-review.md: local review (qodo review + silent-failure-hunter + code-reviewer) before the PR, then Qodo and Bugbot once at open, at most two rounds, Copilot only on request.
 
+`qodo review` is the Qodo CLI: authenticate once with `qodo login`, then run `qodo review` from the worktree to review the unpushed diff. The two-round limit caps how often Qodo and Bugbot are invoked, not whether findings are fixed: every valid finding is fixed or answered before merge, and a new High raised in round two goes to the operator.
+
 1. **Create PR** via `gh pr create`. Include summary and test plan.
 2. **Read all feedback** once Qodo and Bugbot have reported:
    - `gh pr reviews <number>` — check review verdicts
