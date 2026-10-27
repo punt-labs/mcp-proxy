@@ -131,7 +131,7 @@ Mission contract YAMLs go in `.tmp/missions/`. Worker result artifacts go in `.t
 
 **Sub-agent calls always run in the background.** Every `Agent(subagent_type=…)` invocation uses `run_in_background=true`. Zero exceptions. Set `subagent_type` to the ethos identity handle from the delegation table (`bwk`, `mdm`, `rop`, `djb`, `adb`, `rmh`) — bare `Agent` calls spawn an empty shell with no personality or expertise.
 
-**Review-cycle fix rounds** (Copilot / Bugbot findings, mechanical lint sweeps where the write set is obvious) use bare `Agent(subagent_type=<handle>)` instead of a mission. Missions are for design work and multi-step implementations; a review round on a well-scoped diff does not need the ceremony.
+**Review-cycle fix rounds** (Qodo / Bugbot findings, mechanical lint sweeps where the write set is obvious) use bare `Agent(subagent_type=<handle>)` instead of a mission. Missions are for design work and multi-step implementations; a review round on a well-scoped diff does not need the ceremony.
 
 ## Quality Gates
 
@@ -190,17 +190,16 @@ bd sync                               # push to remote
 
 ### Code Review
 
-Copilot auto-reviews every push via branch ruleset (`review_on_push: true`). No manual review request needed.
+PR review follows punt-kit/standards/pr-review.md: local review (qodo review + silent-failure-hunter + code-reviewer) before the PR, then Qodo and Bugbot once at open, at most two rounds, Copilot only on request.
 
 1. **Create PR** via `gh pr create`. Include summary and test plan.
-2. **Background watch** — immediately run `sleep 5 && gh pr checks <number> --watch --fail-fast` in background. Do not block the main shell. Copilot and Bugbot may take 1–3 minutes after CI completes.
-3. **Read all feedback** when background watch completes:
+2. **Read all feedback** once Qodo and Bugbot have reported:
    - `gh pr reviews <number>` — check review verdicts
    - `gh api repos/punt-labs/mcp-proxy/pulls/<number>/comments` — read inline comments
    - `gh pr checks <number>` — verify all checks green
-4. **Take every comment seriously.** If a reviewer flags it, fix it. No "pre-existing" or "out of scope" excuses.
-5. **Fix, re-push, repeat.** Each push triggers a new Copilot review cycle. Expect **2–6 review cycles** before merging. Run `make check` before each push.
-6. **Merge only when the last cycle is uneventful** — zero new comments, all checks green. Use `gh pr merge <number> --squash --delete-branch`.
+3. **Take every comment seriously.** If a reviewer flags it, fix it, or answer it with the exact finding, the specific reason, and the code reference. No "pre-existing" or "out of scope" excuses.
+4. **Fix and push once per round.** Run `make check` before each push.
+5. **Merge when CI is green and every review thread is resolved.** Use `gh pr merge <number> --squash --delete-branch`.
 
 The entire PR cycle (create → review → fix → merge) should be autonomous. Do not require user intervention to land a clean PR.
 
