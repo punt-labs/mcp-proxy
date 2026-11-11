@@ -14,6 +14,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   run fails. It uses the org `BIFF_RELAY_TOKEN` secret and `BIFF_RELAY_URL`
   variable; pull-request runs and successful runs send nothing.
 
+### Security
+
+- Go toolchain bumped from go1.26.10 to go1.26.11, fixing standard-library
+  advisory GO-2026-6859 (net/http `MaxBytesReader` header race) that
+  `govulncheck` flags in the shipped binary.
+
 ## [0.5.0] - 2026-10-22
 
 ### Added
