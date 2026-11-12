@@ -12,7 +12,7 @@ There is no such thing as a "pre-existing" issue. If you see a problem — in co
 
 The binary is `mcp-proxy`. Invocation: `mcp-proxy <daemon-url>`. Health check: `mcp-proxy --health <daemon-url>`. Hook relay: `mcp-proxy <daemon-url> --hook <event>`.
 
-Check `bd ready` for current unblocked work.
+Check `bd ready --label-any repo:mcp --exclude-label deferred` for current unblocked work. Linear is the tracker of record; see Issue Tracking below.
 
 ## Architecture
 
@@ -179,14 +179,31 @@ The Makefile is the source of truth for what `check` means (`make help` to see a
 - Branch naming: `feat/stdio-bridge`, `fix/session-key`, `refactor/transport`
 - Conventional commits: `feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `chore:`
 
-### Beads Issue Tracking
+### Issue Tracking
+
+Linear is the tracker of record: the Punt Labs team, issues labelled `repo:mcp`, listed in the shared `mcp-proxy` view. Beads (`bd`) is a read-mostly local mirror; `.punt-labs/punt/CLAUDE.md` (imported below) has the rules for which tracker to write to, and `.beads/README.md` has the mirror commands and the required `bd` build. If an issue discovered here affects multiple repos or requires a standards change, file it against punt-kit instead.
 
 ```bash
-bd ready                              # what's next
-bd update <id> --status in_progress   # claim it
-bd close <id>                         # done
-bd sync                               # push to remote
+# Finding work (local reads of the mirror; refresh it first)
+# Before the first pull, confirm the bd build enforces the label: bd version's
+# commit must be at or after 769f8a1 (see .beads/README.md "bd version"). An
+# older build ignores linear.pull_label and imports the whole PL team.
+bd config get linear.pull_label   # Must print repo:mcp; if not, pull main and re-run before any pull
+bd linear sync --pull-if-stale --relations --team c1dfbb2c-985e-40cf-b004-5127646efc9d
+bd ready --label-any repo:mcp --exclude-label deferred   # Ready work in this repo
+bd list --label-any repo:mcp --status=open               # Open issues in this repo
+bd show <id>                                             # Details with dependencies
 ```
+
+Create, claim (In Progress), finish (Done) and cancel issues in Linear, with the `repo:mcp` label plus a type label (`Bug`, `Feature`, `Improvement`, `Epic`). A local `bd update`, `bd close` or `bd create` is undone by the next pull. After a state change in Linear, refresh the bead with `bd linear sync --pull --issues <PL id> --team c1dfbb2c-985e-40cf-b004-5127646efc9d` (a by-id pull fetches only the named issue). Blockers are `blocks` relations in Linear, mirrored with `bd dep add <bead> <blocker>` when the refresh ran without `--relations`.
+
+| Priority | Linear | Meaning |
+|----------|--------|---------|
+| P0 | Urgent | Critical - drop everything |
+| P1 | High | Do soon |
+| P2 | Medium (default) | Normal |
+| P3 | Low | When time permits |
+| P4 | No priority | Backlog |
 
 ### Code Review
 
@@ -210,11 +227,11 @@ The entire PR cycle (create → review → fix → merge) should be autonomous. 
 ```bash
 git status
 git add <files>
-bd sync
 git commit -m "..."
-bd sync
 git push
 ```
+
+Issue status is written in Linear, never with a local `bd` edit; there is no beads sync step.
 
 ## Design Decisions
 
