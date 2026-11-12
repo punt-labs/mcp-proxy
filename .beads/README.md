@@ -35,6 +35,10 @@ is loaded from Proton Pass (`pass-cli`, vault `dev`, item
 ## Daily commands
 
 ```bash
+bd config get linear.pull_label
+                      # must print repo:mcp, and bd must be built at or after
+                      # 769f8a1 (see "bd version" below); an older build
+                      # ignores the label and imports the whole PL team
 bd linear sync --pull-if-stale --relations --team c1dfbb2c-985e-40cf-b004-5127646efc9d
                       # refresh the mirror from Linear (needs LINEAR_API_KEY)
 bd list --label-any repo:mcp
@@ -52,7 +56,8 @@ no pull removes one: a blocker added in Linear also needs `bd dep add
 <bead> <blocker>` here when the mirror was refreshed without `--relations`,
 and a blocker cleared in Linear needs `bd dep remove <bead> <blocker>`.
 The guide's "Never" list applies here in full: no bare `bd linear sync`,
-no `bd config set linear.*` (shared by every repo), and never remove
+no unscoped `--push`, no `bd config set linear.*` (shared by every repo),
+and never remove
 `issue-prefix` or `linear.pull_label` from `config.yaml`. A pull is a
 beads write: before running one, `bd config get linear.pull_label` on the
 main checkout must print `repo:mcp`, or the pull imports the whole Punt

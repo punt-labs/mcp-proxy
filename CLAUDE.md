@@ -185,6 +185,9 @@ Linear is the tracker of record: the Punt Labs team, issues labelled `repo:mcp`,
 
 ```bash
 # Finding work (local reads of the mirror; refresh it first)
+# Before the first pull, confirm the bd build enforces the label: bd version's
+# commit must be at or after 769f8a1 (see .beads/README.md "bd version"). An
+# older build ignores linear.pull_label and imports the whole PL team.
 bd config get linear.pull_label   # Must print repo:mcp; if not, pull main and re-run before any pull
 bd linear sync --pull-if-stale --relations --team c1dfbb2c-985e-40cf-b004-5127646efc9d
 bd ready --label-any repo:mcp --exclude-label deferred   # Ready work in this repo
