@@ -1,6 +1,6 @@
 # bd 1.0.x server-mode setup. Source of truth lives in central Hosted DoltDB,
-# accessed via metadata.json + BEADS_DOLT_* env vars set by the org-root
-# .envrc (in the punt-labs meta-repo) plus ~/.config/beads/server.json for TLS.
+# accessed via metadata.json + BEADS_DOLT_* env vars set by this repo's
+# .envrc plus ~/.config/beads/server.json for TLS.
 # Local-only files: never tracked.
 #
 # DO NOT add negation patterns (e.g. `!issues.jsonl`) here. Negations would

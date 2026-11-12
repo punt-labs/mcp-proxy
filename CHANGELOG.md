@@ -19,7 +19,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Linear is the tracker of record (Punt Labs team, label `repo:mcp`);
   beads is a scoped local mirror. `.beads/config.yaml` carries
   `issue-prefix` and `linear.pull_label`, and the agent instructions no
-  longer tell a session to run `bd sync` or edit beads locally.
+  longer tell a session to run `bd sync` or make a local issue edit
+  (`bd create`/`update`/`close`); mirroring a Linear blocker edge with
+  `bd dep add`/`remove` stays the one sanctioned local write.
 
 ### Security
 
