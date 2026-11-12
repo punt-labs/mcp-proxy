@@ -14,6 +14,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   run fails. It uses the org `BIFF_RELAY_TOKEN` secret and `BIFF_RELAY_URL`
   variable; pull-request runs and successful runs send nothing.
 
+### Changed
+
+- Linear is the tracker of record (Punt Labs team, label `repo:mcp`);
+  beads is a scoped local mirror. `.beads/config.yaml` carries
+  `issue-prefix` and `linear.pull_label`, and the agent instructions no
+  longer tell a session to run `bd sync` or edit beads locally.
+
 ### Security
 
 - Go toolchain bumped from go1.26.10 to go1.26.11, fixing standard-library
