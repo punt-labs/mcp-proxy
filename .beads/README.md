@@ -64,9 +64,9 @@ The guide's "Never" list applies here in full: no bare `bd linear sync`,
 no unscoped `--push`, no `bd config set linear.*` (shared by every repo),
 and never remove
 `issue-prefix` or `linear.pull_label` from `config.yaml`. A pull is a
-beads write: before running one, `bd config get linear.pull_label` on the
-main checkout must print `repo:mcp`, or the pull imports the whole Punt
-Labs team.
+beads write: `bd` reads the `config.yaml` of the checkout it runs in, so
+before running one, `bd config get linear.pull_label` there must print
+`repo:mcp`, or the pull imports the whole Punt Labs team.
 
 Older bead ids in this repo carry the long-form `mcp-proxy-` prefix
 (`mcp-proxy-80n`); beads created since the prefix changed carry `mcp-`
