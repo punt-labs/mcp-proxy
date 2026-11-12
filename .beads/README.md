@@ -4,20 +4,25 @@ Linear is the tracker of record for mcp-proxy: the Punt Labs team (key
 `PL`), issues labelled `repo:mcp`. **bd** (beads) is a read-mostly local
 mirror of those issues in the punt-labs central Hosted DoltDB instance.
 There is **no per-repo issue store** — all beads live in one shared
-database, distinguished by `issue_prefix` set in `.beads/metadata.json`.
-The operating rules are in `.punt-labs/punt/CLAUDE.md`.
+database, distinguished by this repo's `issue-prefix` (set in
+`.beads/config.yaml`, mirrored in `.beads/metadata.json`). The operating
+rules are in `.punt-labs/punt/CLAUDE.md`.
 
 ## Source of truth
 
-- Issues live in Linear; every mirrored bead stores its Linear URL in
-  `external_ref`. The mirror is central Hosted DoltDB
+- Issues live in Linear; every open mirrored bead stores its Linear URL in
+  `external_ref`. Closed history from before the migration stays in beads
+  only and has no `external_ref`. The mirror is central Hosted DoltDB
   (`punt-labs-beads-1.dbs.hosted.doltdb.com`).
 - `.beads/metadata.json` holds the connection mode + this repo's
   `issue_prefix`.
 - `.beads/config.yaml` scopes `bd linear sync --pull` to this repo:
   `linear.pull_label` selects the issues, and `issue-prefix` names the
-  beads a pull creates. `bd` reads one prefix key, this one when set and
-  the `metadata.json` value as the fallback, so keep the two equal.
+  beads a pull creates. For the prefix, `bd` reads the `BD_ISSUE_PREFIX`
+  environment variable when set, else this `issue-prefix`, else the
+  `metadata.json` value; keep the two files equal. A by-id pull is the
+  exception: `bd linear sync --pull --issues` reads the shared DB
+  `issue_prefix` row (which is `punt-labs`), so pass it PL ids, not bead ids.
 - `.beads/issues.jsonl` and `.beads/interactions.jsonl` are local
   export views. Auto-export is disabled (`export.auto: false`);
   run `bd export` manually if needed. They are **gitignored** and

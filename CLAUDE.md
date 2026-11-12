@@ -195,7 +195,7 @@ bd list --label-any repo:mcp --status=open               # Open issues in this r
 bd show <id>                                             # Details with dependencies
 ```
 
-Create, claim (In Progress), finish (Done) and cancel issues in Linear, with the `repo:mcp` label plus a type label (`Bug`, `Feature`, `Improvement`, `Epic`). A local `bd update`, `bd close` or `bd create` is undone by the next pull. After a state change in Linear, refresh the bead with `bd linear sync --pull --issues <PL id> --team c1dfbb2c-985e-40cf-b004-5127646efc9d` (a by-id pull fetches only the named issue). Blockers are `blocks` relations in Linear, mirrored with `bd dep add <bead> <blocker>` when the refresh ran without `--relations`.
+Create, claim (In Progress), finish (Done) and cancel issues in Linear, with the `repo:mcp` label plus a type label (`Bug`, `Feature`, `Improvement`, `Epic`). A local `bd update` or `bd close` is undone by the next pull of that issue; a local `bd create` leaves an orphan bead with no `external_ref` that no pull removes. After a state change in Linear, refresh the bead with `bd linear sync --pull --issues <PL id> --team c1dfbb2c-985e-40cf-b004-5127646efc9d` (a by-id pull fetches only the named issue, by its PL id). Blockers are `blocks` relations in Linear: a pull adds `blocks` edges but removes none, so mirror an added blocker with `bd dep add <bead> <blocker>` (when the refresh ran without `--relations`) and a cleared one with `bd dep remove <bead> <blocker>`. These `bd dep` edits are the sanctioned local-mirror writes; a local issue edit (`bd update`, `bd close`, `bd create`) is not.
 
 | Priority | Linear | Meaning |
 |----------|--------|---------|
