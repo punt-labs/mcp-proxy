@@ -12,7 +12,7 @@ There is no such thing as a "pre-existing" issue. If you see a problem — in co
 
 The binary is `mcp-proxy`. Invocation: `mcp-proxy <daemon-url>`. Health check: `mcp-proxy --health <daemon-url>`. Hook relay: `mcp-proxy <daemon-url> --hook <event>`.
 
-Check `bd ready --label-any repo:mcp --exclude-label deferred` for current unblocked work. Linear is the tracker of record; see Issue Tracking below.
+Linear is the tracker of record; see Issue Tracking below for current work.
 
 ## Architecture
 
@@ -181,21 +181,9 @@ The Makefile is the source of truth for what `check` means (`make help` to see a
 
 ### Issue Tracking
 
-Linear is the tracker of record: the Punt Labs team, issues labelled `repo:mcp`, listed in the shared `mcp-proxy` view. Beads (`bd`) is a read-mostly local mirror; `.punt-labs/punt/CLAUDE.md` (imported below) has the rules for which tracker to write to, and `.beads/README.md` has the mirror commands and the required `bd` build. If an issue discovered here affects multiple repos or requires a standards change, file it against punt-kit instead.
+Linear is the tracker of record: the Punt Labs team, issues labelled `repo:mcp`, listed in the shared `mcp-proxy` view. `.punt-labs/punt/CLAUDE.md` (imported below) has the tracking rules. If an issue discovered here affects multiple repos or requires a standards change, file it against punt-kit instead.
 
-```bash
-# Finding work (local reads of the mirror; refresh it first)
-# Before the first pull, confirm the bd build enforces the label: bd version's
-# commit must be at or after 769f8a1 (see .beads/README.md "bd version"). An
-# older build ignores linear.pull_label and imports the whole PL team.
-bd config get linear.pull_label   # Must print repo:mcp; if not, pull main and re-run before any pull
-bd linear sync --pull-if-stale --relations --team c1dfbb2c-985e-40cf-b004-5127646efc9d
-bd ready --label-any repo:mcp --exclude-label deferred   # Ready work in this repo
-bd list --label-any repo:mcp --status=open               # Open issues in this repo
-bd show <id>                                             # Details with dependencies
-```
-
-Create, claim (In Progress), finish (Done) and cancel issues in Linear, with the `repo:mcp` label plus a type label (`Bug`, `Feature`, `Improvement`, `Epic`). A local `bd update` or `bd close` is undone by the next pull of that issue; a local `bd create` leaves an orphan bead with no `external_ref` that no pull removes. After a state change in Linear, refresh the bead with `bd linear sync --pull --issues <PL id> --team c1dfbb2c-985e-40cf-b004-5127646efc9d` (a by-id pull fetches only the named issue, by its PL id). Blockers are `blocks` relations in Linear: a pull adds `blocks` edges but removes none, so mirror an added blocker with `bd dep add <bead> <blocker>` (when the refresh ran without `--relations`) and a cleared one with `bd dep remove <bead> <blocker>`. These `bd dep` edits are the sanctioned local-mirror writes; a local issue edit (`bd update`, `bd close`, `bd create`) is not.
+Create, claim (In Progress), finish (Done) and cancel issues in Linear, with the `repo:mcp` label plus a type label (`Bug`, `Feature`, `Improvement`, `Epic`). Blockers are `blocks` relations in Linear.
 
 | Priority | Linear | Meaning |
 |----------|--------|---------|
@@ -231,7 +219,7 @@ git commit -m "..."
 git push
 ```
 
-Issue status is written in Linear, never with a local `bd` edit; there is no beads sync step.
+Issue status is written in Linear; there is no sync step.
 
 ## Design Decisions
 
@@ -265,7 +253,7 @@ CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -o dist/mcp-proxy-linux-amd64  
 **`../punt-kit/`** is the Punt Labs standards repo. Applicable standards:
 
 - [`punt-kit/standards/github.md`](../punt-kit/standards/github.md) — branch protection, PR workflow
-- [`punt-kit/standards/workflow.md`](../punt-kit/standards/workflow.md) — beads, branch discipline, micro-commits
+- [`punt-kit/standards/workflow.md`](../punt-kit/standards/workflow.md) — tracking, branch discipline, micro-commits
 
 When this file conflicts with punt-kit standards, this file wins (project-specific overrides).
 
