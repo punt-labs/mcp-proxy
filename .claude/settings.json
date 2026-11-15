@@ -7,7 +7,6 @@
       "mcp__github__*",
       "mcp__quarry__*",
       "Bash(bash:*)",
-      "Bash(bd:*)",
       "Bash(cat:*)",
       "Bash(chmod +x:*)",
       "Bash(claude mcp:*)",
