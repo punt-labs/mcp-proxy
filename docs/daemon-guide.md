@@ -79,7 +79,7 @@ For local daemons binding to `127.0.0.1`, authentication is typically unnecessar
 
 ## Hook Endpoint
 
-If your daemon handles [hook relay](../README.md#hook-relay) messages, expose a `/hook` WebSocket endpoint. The proxy connects to `/hook` (not `/mcp`) for hook mode.
+If your daemon handles [hook relay](../README.md#commands) messages, expose a `/hook` WebSocket endpoint. The proxy connects to `/hook` (not `/mcp`) for hook mode.
 
 Hook messages are JSON-RPC with method `hook/<event>` (e.g., `hook/PreToolUse`). The proxy wraps the hook payload as `params`:
 

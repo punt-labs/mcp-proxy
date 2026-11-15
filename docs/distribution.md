@@ -17,7 +17,7 @@ Each release also carries a `checksums.txt` with SHA-256 sums. `make dist` cross
 
 ### `curl | sh` (recommended)
 
-The canonical install command lives in the [README's Quick Start](../README.md#quick-start) and is pinned to the latest release commit. Do not copy an install command from this doc into other repositories — always refer downstream users at the README so they pick up the current pin.
+The canonical install command lives in the [README's Quick Start](../README.md#quick-start) and is pinned to the commit that last changed `install.sh`; the release process updates the pin. Do not copy an install command from this doc into other repositories — always refer downstream users at the README so they pick up the current pin.
 
 `install.sh` detects the platform, downloads the matching binary from the latest GitHub Release, drops it in `~/.local/bin/mcp-proxy`, and adds a `PATH` hint if needed.
 
