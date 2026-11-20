@@ -16,7 +16,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sync"
 )
 
 // FromEnv creates a logger based on MCP_PROXY_DEBUG. Returns the logger
@@ -66,26 +65,18 @@ func Nop() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-// TestLogger wraps a *slog.Logger and captures output for test assertions.
-// Log output is sent to t.Log so it appears only when tests fail or with -v.
+// TestLogger wraps a *slog.Logger that writes to the test log.
 type TestLogger struct {
 	*slog.Logger
-	buf *safeLogBuffer
 }
 
 // NewTestLogger creates a logger that writes to the test's log output.
 func NewTestLogger(t interface{ Log(args ...any) }) *TestLogger {
-	buf := &safeLogBuffer{}
-	w := io.MultiWriter(buf, &testLogWriter{t: t})
+	w := &testLogWriter{t: t}
 	logger := slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	}))
-	return &TestLogger{Logger: logger, buf: buf}
-}
-
-// Output returns all log output captured so far.
-func (tl *TestLogger) Output() string {
-	return tl.buf.String()
+	return &TestLogger{Logger: logger}
 }
 
 type testLogWriter struct {
@@ -95,22 +86,4 @@ type testLogWriter struct {
 func (w *testLogWriter) Write(p []byte) (int, error) {
 	w.t.Log(string(p))
 	return len(p), nil
-}
-
-type safeLogBuffer struct {
-	mu  sync.Mutex
-	buf []byte
-}
-
-func (b *safeLogBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.buf = append(b.buf, p...)
-	return len(p), nil
-}
-
-func (b *safeLogBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return string(b.buf)
 }
