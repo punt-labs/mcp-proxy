@@ -232,7 +232,7 @@ File logging provides clean separation: data on stdout, errors on stderr, diagno
 
 ### Test Logger
 
-`NewTestLogger(t)` writes to both `t.Log()` (visible with `-v`) and a captured buffer (for assertions). This avoids polluting test output while allowing tests to assert on log content.
+`NewTestLogger(t)` sends log messages to `t.Log()`. Go shows them when a test fails or when run with `-v`.
 
 ---
 
