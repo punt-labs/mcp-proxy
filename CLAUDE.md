@@ -126,7 +126,7 @@ Mission contract YAMLs go in `.tmp/missions/`. Worker result artifacts go in `.t
 
 **Every implementation mission contract MUST include commit-per-step in its success criteria.** Required criterion text:
 
-> "Commit incrementally — one commit per logical step (file group, single concern, or single PR-equivalent slice). Each commit must pass `make check`. Do not accumulate more than 30 minutes of uncommitted changes."
+> "Commit incrementally — one commit per logical step (file group, single concern, or single PR-equivalent slice). Each commit must pass the ethos commit-stage checks (gofmt, `go vet`); `make check` must pass before each push. Do not accumulate more than 30 minutes of uncommitted changes."
 
 **Watch for stuck workers by filesystem, not commits.** Assess progress by reading working-tree edits (`git status`, `git diff`, reading the files) — is code changing and advancing? Only a genuine filesystem stall (no edits changing over a long window) with an unresponsive worker justifies `SendMessage` for status and, as a last resort, taking over. Do not kill an agent for not committing, and do not commit its work by proxy while it is actively editing — let workers commit and push their own work on their own timeline.
 
@@ -136,7 +136,7 @@ Mission contract YAMLs go in `.tmp/missions/`. Worker result artifacts go in `.t
 
 ## Quality Gates
 
-Run before every commit:
+Ethos checks (`.punt-labs/ethos/checks/go-default.yaml`, DES-019) run in stages: an advisory `gofmt -l` after each edit, blocking `gofmt` and `go vet` at commit, and a blocking `make check` at handoff. Run the full gate before every push and before handing off:
 
 ```bash
 make check
