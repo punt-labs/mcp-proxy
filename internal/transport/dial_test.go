@@ -2,16 +2,37 @@ package transport_test
 
 import (
 	"context"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/punt-labs/mcp-proxy/internal/debuglog"
 	"github.com/punt-labs/mcp-proxy/internal/testutil"
 	"github.com/punt-labs/mcp-proxy/internal/transport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestDial_AuthorizationRejected(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(status)
+			}))
+			defer server.Close()
+
+			var logs strings.Builder
+			logger := slog.New(slog.NewTextHandler(&logs, nil))
+			_, err := transport.Dial(t.Context(), "ws"+strings.TrimPrefix(server.URL, "http"), 0, nil, "", logger)
+			require.Error(t, err)
+			assert.Equal(t, "authorization_rejected", transport.FailureReason(err))
+			assert.Empty(t, logs.String())
+		})
+	}
+}
 
 func TestDial_Success(t *testing.T) {
 	d := testutil.NewMockDaemon()
@@ -20,7 +41,7 @@ func TestDial_Success(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	logger := debuglog.NewTestLogger(t).Logger
+	logger := testutil.NewTestLogger(t).Logger
 	conn, err := transport.Dial(ctx, d.URL(), 12345, nil, "", logger)
 	require.NoError(t, err)
 	defer conn.Close(websocket.StatusNormalClosure, "")
@@ -37,7 +58,7 @@ func TestDial_BearerToken(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	logger := debuglog.NewTestLogger(t).Logger
+	logger := testutil.NewTestLogger(t).Logger
 	conn, err := transport.Dial(ctx, d.URL(), 12345, nil, "", logger)
 	require.NoError(t, err)
 	defer conn.Close(websocket.StatusNormalClosure, "")
@@ -52,7 +73,7 @@ func TestDial_NoBearerTokenByDefault(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	logger := debuglog.NewTestLogger(t).Logger
+	logger := testutil.NewTestLogger(t).Logger
 	conn, err := transport.Dial(ctx, d.URL(), 12345, nil, "", logger)
 	require.NoError(t, err)
 	defer conn.Close(websocket.StatusNormalClosure, "")
@@ -75,7 +96,7 @@ func TestDial_InvalidURL(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			logger := debuglog.NewTestLogger(t).Logger
+			logger := testutil.NewTestLogger(t).Logger
 			_, err := transport.Dial(ctx, tt.url, 1, nil, "", logger)
 			var urlErr *transport.InvalidURLError
 			assert.ErrorAs(t, err, &urlErr)
@@ -87,7 +108,7 @@ func TestDial_ConnectionRefused(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	logger := debuglog.NewTestLogger(t).Logger
+	logger := testutil.NewTestLogger(t).Logger
 	// Port 1 is almost certainly not listening.
 	_, err := transport.Dial(ctx, "ws://127.0.0.1:1/mcp", 1, nil, "", logger)
 	require.Error(t, err)
@@ -107,7 +128,7 @@ func TestDial_ExtraHeaders(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	logger := debuglog.NewTestLogger(t).Logger
+	logger := testutil.NewTestLogger(t).Logger
 	extra := map[string]string{
 		"X-Custom-Header": "my-value",
 	}
@@ -127,7 +148,7 @@ func TestDial_ExtraHeaders_OverrideToken(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	logger := debuglog.NewTestLogger(t).Logger
+	logger := testutil.NewTestLogger(t).Logger
 	extra := map[string]string{
 		"Authorization": "Bearer config-token",
 	}
@@ -143,7 +164,7 @@ func TestDial_Timeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	logger := debuglog.NewTestLogger(t).Logger
+	logger := testutil.NewTestLogger(t).Logger
 	// Non-routable address to trigger timeout.
 	_, err := transport.Dial(ctx, "ws://192.0.2.1:9999/mcp", 1, nil, "", logger)
 	require.Error(t, err)

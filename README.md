@@ -138,7 +138,9 @@ In proxy mode the proxy does not change message contents. It reads only the `met
 | `MCP_PROXY_TOKEN` | *(unset)* | Bearer token sent as `Authorization: Bearer <token>` when the WebSocket connection opens. |
 | `MCP_PROXY_PING_INTERVAL` | `5s` | How often the proxy sends a WebSocket ping. Set to `0` to turn keepalive off. |
 | `MCP_PROXY_PONG_TIMEOUT` | `2s` | How long the proxy waits for a pong before it treats the daemon as unresponsive and reconnects. |
-| `MCP_PROXY_DEBUG` | *(unset)* | `1` or `true` writes a debug log to `$TMPDIR/mcp-proxy-<pid>.log`; any other value is used as the log file path. The log file is created with `0600` permissions. |
+| `MCP_PROXY_DEBUG` | *(unset)* | `1` or `true` enables DEBUG records in the private log. Custom log paths are no longer supported. |
+| `PUNT_TELEMETRY` | *(unset)* | `off` disables all Punt Labs usage capture. |
+| `MCP_PROXY_TELEMETRY` | *(unset)* | `off` disables mcp-proxy usage capture. |
 
 ### Config File
 
@@ -164,6 +166,25 @@ Authorization = "Bearer <token>"
 - `[<profile>.headers]` lists extra HTTP headers sent when the connection opens. An `Authorization` header here overrides `MCP_PROXY_TOKEN`.
 
 The file must have `0600` permissions or stricter; the proxy exits with an error if it does not. If the file or the `[<profile>]` section is missing, the proxy uses `ws://localhost:8420/mcp`. A URL on the command line takes precedence over `url`; the headers and `ca_cert` still apply.
+
+### Diagnostics and Usage
+
+Proxy, hook, and health diagnostics are written at INFO and above to
+`~/.punt-labs/mcp-proxy/logs/mcp-proxy.log`. The log and its five
+rotating backups are private (`0600`) and limited to 5 MiB each. Look
+there for connection, retry, and shutdown diagnostics. Logs do not go to
+MCP stdout or contain URLs, tokens, or message contents.
+If the rotation lock is held for two seconds during startup, the command
+warns once on stderr and continues without file diagnostics.
+
+By default, each completed proxy, hook, or health operation records its
+kind, duration, and outcome in `~/.punt-labs/mcp-proxy/telemetry.db`.
+The private SQLite store retains usage for 90 days. No usage leaves the
+machine. Either environment off switch above disables capture without
+disabling diagnostic logs. To disable capture in configuration, put
+`disabled = true` in `~/.punt-labs/mcp-proxy/telemetry.conf` (TOML). The same
+file accepts `retention_days` from 1 to 3650. The settings file is separate
+from daemon connection profiles.
 
 ## Exit Codes
 
@@ -201,7 +222,7 @@ Claude Code ◄──────────────► mcp-proxy ◄──
 
 **Forwarding.** Messages pass in both directions over one WebSocket connection. Messages the daemon sends on its own, such as `notifications/tools/list_changed`, appear on stdout as soon as they arrive.
 
-**Reconnect.** When the connection is lost (network failure, WebSocket close, or pong timeout), the proxy reconnects with exponential backoff starting at 250 ms and capped at 5 seconds. Messages read from stdin during the outage are sent on the new connection. Connection status is printed to stderr.
+**Reconnect.** When the connection is lost (network failure, WebSocket close, or pong timeout), the proxy reconnects with exponential backoff starting at 250 ms and capped at 5 seconds. Messages read from stdin during the outage are sent on the new connection. Connection status is recorded in the private log.
 
 **Keepalive.** The proxy sends a WebSocket ping every `MCP_PROXY_PING_INTERVAL`. If no pong arrives within `MCP_PROXY_PONG_TIMEOUT`, it closes the connection and reconnects. This catches a daemon whose TCP connection stays open after it has stopped processing messages.
 

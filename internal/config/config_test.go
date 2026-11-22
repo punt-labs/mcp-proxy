@@ -34,6 +34,37 @@ func setHome(t *testing.T, home string) {
 	t.Setenv("HOME", home)
 }
 
+func TestLoadTelemetry_Retention(t *testing.T) {
+	for _, tc := range []struct {
+		name, setting string
+		want          int
+		invalid       bool
+	}{
+		{name: "omitted"},
+		{name: "zero", setting: "retention_days = 0", invalid: true},
+		{name: "uppercase zero", setting: "RETENTION_DAYS = 0", invalid: true},
+		{name: "mixed case above max", setting: "Retention_Days = 3651", invalid: true},
+		{name: "uppercase minimum", setting: "RETENTION_DAYS = 1", want: 1},
+		{name: "maximum", setting: "retention_days = 3650", want: 3650},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			dir := filepath.Join(home, ".punt-labs", "mcp-proxy")
+			require.NoError(t, os.MkdirAll(dir, 0o700))
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "telemetry.conf"), []byte(tc.setting), 0o600))
+			setHome(t, home)
+
+			settings, err := config.LoadTelemetry()
+			if tc.invalid {
+				require.ErrorContains(t, err, "retention must be between")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, settings.RetentionDays)
+		})
+	}
+}
+
 func TestLoad_FileNotFound_Fallback(t *testing.T) {
 	// Point HOME at a fresh dir with no config file.
 	setHome(t, t.TempDir())

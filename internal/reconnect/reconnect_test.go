@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/punt-labs/mcp-proxy/internal/debuglog"
 	"github.com/punt-labs/mcp-proxy/internal/reconnect"
 	"github.com/punt-labs/mcp-proxy/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -86,7 +85,7 @@ func TestBasicRequestResponse(t *testing.T) {
 
 	stdinR, stdinW := io.Pipe()
 	stdout := &testutil.SafeBuffer{}
-	logger := debuglog.NewTestLogger(t)
+	logger := testutil.NewTestLogger(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -113,7 +112,7 @@ func TestReconnect(t *testing.T) {
 
 	stdinR, stdinW := io.Pipe()
 	stdout := &testutil.SafeBuffer{}
-	logger := debuglog.NewTestLogger(t)
+	logger := testutil.NewTestLogger(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -154,7 +153,7 @@ func TestMultipleReconnects(t *testing.T) {
 
 	stdinR, stdinW := io.Pipe()
 	stdout := &testutil.SafeBuffer{}
-	logger := debuglog.NewTestLogger(t)
+	logger := testutil.NewTestLogger(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -191,7 +190,7 @@ func TestStdinEOF(t *testing.T) {
 
 	stdinR, stdinW := io.Pipe()
 	stdout := &testutil.SafeBuffer{}
-	logger := debuglog.NewTestLogger(t)
+	logger := testutil.NewTestLogger(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -214,7 +213,7 @@ func TestInitialDialRetry(t *testing.T) {
 
 	stdinR, stdinW := io.Pipe()
 	stdout := &testutil.SafeBuffer{}
-	logger := debuglog.NewTestLogger(t)
+	logger := testutil.NewTestLogger(t)
 
 	failCount := 0
 	dial := func(ctx context.Context) (reconnect.Conn, error) {
@@ -249,7 +248,7 @@ func TestContextCancellation(t *testing.T) {
 
 	stdinR, _ := io.Pipe()
 	stdout := &testutil.SafeBuffer{}
-	logger := debuglog.NewTestLogger(t)
+	logger := testutil.NewTestLogger(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 
@@ -275,7 +274,7 @@ func TestMessagePreservation(t *testing.T) {
 
 	stdinR, stdinW := io.Pipe()
 	stdout := &testutil.SafeBuffer{}
-	logger := debuglog.NewTestLogger(t)
+	logger := testutil.NewTestLogger(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -315,7 +314,7 @@ func TestPingTimeout_TriggersReconnect(t *testing.T) {
 
 	stdinR, stdinW := io.Pipe()
 	stdout := &testutil.SafeBuffer{}
-	logger := debuglog.NewTestLogger(t)
+	logger := testutil.NewTestLogger(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -410,7 +409,7 @@ func TestReconnect_HandshakeReplay(t *testing.T) {
 
 	stdinR, stdinW := io.Pipe()
 	stdout := &testutil.SafeBuffer{}
-	logger := debuglog.NewTestLogger(t)
+	logger := testutil.NewTestLogger(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -476,7 +475,7 @@ func TestReconnect_SwallowsReplayedResponse(t *testing.T) {
 
 	stdinR, stdinW := io.Pipe()
 	stdout := &testutil.SafeBuffer{}
-	logger := debuglog.NewTestLogger(t)
+	logger := testutil.NewTestLogger(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -518,7 +517,7 @@ func TestReconnect_NoHandshakeCached(t *testing.T) {
 
 	stdinR, stdinW := io.Pipe()
 	stdout := &testutil.SafeBuffer{}
-	logger := debuglog.NewTestLogger(t)
+	logger := testutil.NewTestLogger(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -563,7 +562,7 @@ func TestReconnect_PreservesClientIDs(t *testing.T) {
 
 	stdinR, stdinW := io.Pipe()
 	stdout := &testutil.SafeBuffer{}
-	logger := debuglog.NewTestLogger(t)
+	logger := testutil.NewTestLogger(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -618,7 +617,7 @@ func TestHandshake_SniffIgnoresNullID(t *testing.T) {
 
 	stdinR, stdinW := io.Pipe()
 	stdout := &testutil.SafeBuffer{}
-	logger := debuglog.NewTestLogger(t)
+	logger := testutil.NewTestLogger(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -666,7 +665,7 @@ func TestHandshake_SniffIgnoresExplicitNullID(t *testing.T) {
 
 	stdinR, stdinW := io.Pipe()
 	stdout := &testutil.SafeBuffer{}
-	logger := debuglog.NewTestLogger(t)
+	logger := testutil.NewTestLogger(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -714,7 +713,7 @@ func TestMultipleReconnects_HandshakeReplay(t *testing.T) {
 
 	stdinR, stdinW := io.Pipe()
 	stdout := &testutil.SafeBuffer{}
-	logger := debuglog.NewTestLogger(t)
+	logger := testutil.NewTestLogger(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()

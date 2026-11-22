@@ -27,7 +27,7 @@ func Run(ctx context.Context, stdin io.Reader, stdout io.Writer, conn *websocket
 	defer cancel()
 	defer func() {
 		if err := conn.CloseNow(); err != nil {
-			logger.Debug("closing daemon connection", "error", err)
+			logger.Debug("Daemon connection could not be closed cleanly")
 		}
 	}()
 
@@ -72,7 +72,7 @@ func Run(ctx context.Context, stdin io.Reader, stdout io.Writer, conn *websocket
 				mu.Lock()
 				stdinErr = fmt.Errorf("writing to daemon: %w", err)
 				mu.Unlock()
-				logger.Debug("stdin→daemon write failed", "error", err)
+				logger.Debug("Daemon write failed")
 				return
 			}
 		}
@@ -83,7 +83,7 @@ func Run(ctx context.Context, stdin io.Reader, stdout io.Writer, conn *websocket
 			mu.Lock()
 			stdinErr = fmt.Errorf("reading stdin: %w", err)
 			mu.Unlock()
-			logger.Debug("stdin scanner error", "error", err)
+			logger.Debug("Stdin scanner failed")
 			return
 		}
 
@@ -102,7 +102,7 @@ func Run(ctx context.Context, stdin io.Reader, stdout io.Writer, conn *websocket
 			// Unblock the scanner if it's stuck on stdin.Read().
 			if closer, ok := stdin.(io.Closer); ok {
 				if err := closer.Close(); err != nil {
-					logger.Debug("closing stdin", "error", err)
+					logger.Debug("Stdin could not be closed cleanly")
 				}
 			}
 		}()
@@ -120,7 +120,7 @@ func Run(ctx context.Context, stdin io.Reader, stdout io.Writer, conn *websocket
 				mu.Lock()
 				daemonErr = fmt.Errorf("reading from daemon: %w", err)
 				mu.Unlock()
-				logger.Debug("daemon read failed", "error", err)
+				logger.Debug("Daemon read failed")
 				return
 			}
 
@@ -134,7 +134,7 @@ func Run(ctx context.Context, stdin io.Reader, stdout io.Writer, conn *websocket
 				mu.Lock()
 				daemonErr = fmt.Errorf("writing to stdout: %w", writeErr)
 				mu.Unlock()
-				logger.Debug("stdout write failed", "error", writeErr)
+				logger.Debug("Stdout write failed")
 				return
 			}
 		}
@@ -150,9 +150,9 @@ func Run(ctx context.Context, stdin io.Reader, stdout io.Writer, conn *websocket
 		return nil
 	}
 	if stdinErr != nil {
-		logger.Debug("bridge stopped", "cause", "stdin error", "error", stdinErr)
+		logger.Debug("Bridge stopped", "cause", "stdin error")
 		return stdinErr
 	}
-	logger.Debug("bridge stopped", "cause", "daemon error", "error", daemonErr)
+	logger.Debug("Bridge stopped", "cause", "daemon error")
 	return daemonErr
 }

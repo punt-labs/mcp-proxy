@@ -16,10 +16,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Proxy, hook, and health diagnostics now use a private, shared rotating
+  log at `~/.punt-labs/mcp-proxy/logs/mcp-proxy.log`. `MCP_PROXY_DEBUG=1`
+  or `true` enables DEBUG in that file instead of selecting a separate path.
+  Startup warns once on stderr and continues without file diagnostics if the
+  shared rotation lock cannot be acquired within two seconds.
+- Usage telemetry records operation duration and outcome in a private local
+  SQLite store; it can be disabled independently of diagnostic logging.
 - Generated Ethos agent edit hooks now use advisory, read-only Go formatting
   checks instead of running `make check` after every edit. The project check
   set blocks formatting/vet failures at commit and runs the full gate at
-  handoff with a twenty-minute budget (DES-018; requires updated Ethos hooks).
+  handoff with a twenty-minute budget (DES-019; requires updated Ethos hooks).
 - Linear is the tracker of record (Punt Labs team, label `repo:mcp`).
   The beads tracker is removed: `.beads/`, the `BEADS_*` block in
   `.envrc`, the `bd` gitattributes merge driver, the `bd` permission

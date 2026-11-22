@@ -44,7 +44,7 @@ mcp-proxy --health ws://host/mcp ──► dial + close ──► exit 0/1
 | `internal/reconnect` | Reconnecting bridge: stdin channel, per-connection goroutines, backoff |
 | `internal/transport` | WebSocket dial with typed errors, session key injection, bearer token auth |
 | `internal/session` | Process-tree walking to resolve Claude Code session key |
-| `internal/debuglog` | Structured `slog` debug logging via `MCP_PROXY_DEBUG` env var |
+| `cmd/mcp-proxy/observe.go` | Shared private diagnostics and local usage telemetry |
 | `internal/testutil` | Mock daemon (`httptest.Server` + WebSocket), stdio pipe helpers |
 | `internal/e2e` | Black-box binary tests (build tag `e2e`) |
 | `internal/integration` | Real daemon roundtrip tests (build tag `integration`) |
@@ -203,6 +203,8 @@ Individual daemon projects may add auto-start logic to their own installers or l
 ---
 
 ## DES-006: Debug Logging — File-Only via MCP_PROXY_DEBUG
+
+Superseded by [DES-018](#des-018-shared-diagnostics-and-usage-telemetry).
 
 **Date:** 2026-03-11
 **Status:** SETTLED
@@ -862,6 +864,29 @@ Cleanest cobra-idiomatic layout: one subcommand per mode. Rejected because every
 
 ---
 
+## DES-018: Shared Diagnostics and Usage Telemetry
+
+**Status:** SETTLED
+**Issue:** PL-1316
+
+The proxy, hook and health entry points use punt-observe-go for a private
+diagnostic file shared across processes. This supersedes DES-006: the default
+is INFO and `MCP_PROXY_DEBUG=1` or `true` enables DEBUG in the same file.
+Arbitrary log paths are no longer supported. The sink owns locking, rotation
+and final-record redaction; callers emit only fixed messages and safe metadata.
+MCP stdout remains reserved for protocol traffic.
+
+Each runtime invocation records one versioned span with its latency and
+outcome, without identifiers or wire data. The shared package owns local
+SQLite and retention, and can be disabled independently from diagnostics.
+User-owned telemetry settings live apart from daemon connection profiles,
+which other tools may regenerate. The shared sink waits at most two seconds
+for the rotation lock during startup. If the diagnostic sink cannot be opened
+privately, warn once on stderr and continue without a diagnostic sink.
+Its pure-Go driver preserves the static build required by DES-014.
+
+---
+
 ## Open Questions
 
 1. ~~**Daemon auto-start.** Proxy starts daemon if missing, or always user's responsibility?~~ Settled: no auto-start (DES-005), but reconnect with backoff (DES-009) handles daemon restarts transparently.
@@ -871,7 +896,7 @@ Cleanest cobra-idiomatic layout: one subcommand per mode. Rejected because every
 
 ---
 
-## DES-018: Advisory Edit Checks and Staged Quality Gates
+## DES-019: Advisory Edit Checks and Staged Quality Gates
 
 **Date:** 2026-11-22
 **Status:** SETTLED

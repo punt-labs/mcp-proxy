@@ -11,7 +11,6 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/punt-labs/mcp-proxy/internal/bridge"
-	"github.com/punt-labs/mcp-proxy/internal/debuglog"
 	"github.com/punt-labs/mcp-proxy/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,7 +20,7 @@ import (
 // Log output appears only when tests fail or with -v.
 func testLogger(t *testing.T) *slog.Logger {
 	t.Helper()
-	return debuglog.NewTestLogger(t).Logger
+	return testutil.NewTestLogger(t).Logger
 }
 
 // waitForOutput polls stdoutBuf until it contains at least n lines or timeout.

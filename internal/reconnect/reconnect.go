@@ -15,10 +15,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/punt-labs/mcp-proxy/internal/transport"
 )
 
 // Conn is the subset of *websocket.Conn used by the reconnect loop.
@@ -114,8 +114,11 @@ func RunWithConfig(ctx context.Context, stdin io.Reader, stdout io.Writer, dial 
 				return ctx.Err()
 			}
 			wait := nextBackoff(attempt)
-			logger.Debug("dial failed, retrying", "error", err, "backoff", wait)
-			fmt.Fprintf(os.Stderr, "mcp-proxy: daemon unreachable, retrying in %s...\n", wait)
+			if attempt == 0 {
+				logger.Warn("Daemon connection failed; retrying", "reason", transport.FailureReason(err), "backoff", wait)
+			} else {
+				logger.Debug("Daemon connection retry failed", "reason", transport.FailureReason(err), "backoff", wait)
+			}
 			select {
 			case <-time.After(wait):
 			case <-ctx.Done():
@@ -128,18 +131,15 @@ func RunWithConfig(ctx context.Context, stdin io.Reader, stdout io.Writer, dial 
 		// Connected — reset backoff and announce.
 		attempt = 0
 		connNum++
-		fmt.Fprintln(os.Stderr, "mcp-proxy: connected")
-		logger.Debug("connected", "connNum", connNum)
-
 		isReconnect := connNum > 1
+		logger.Info("Connected to daemon", "reconnected", isReconnect)
 		pending, err = runConnection(ctx, conn, lines, stdinDone, stdout, pending, cfg, logger, &hs, isReconnect)
 		if closeErr := conn.CloseNow(); closeErr != nil {
-			logger.Debug("closing daemon connection", "error", closeErr)
+			logger.Debug("Daemon connection could not be closed cleanly")
 		}
 
 		if err == nil {
 			// stdin EOF — clean shutdown.
-			logger.Debug("stdin EOF, shutting down")
 			return nil
 		}
 
@@ -148,8 +148,7 @@ func RunWithConfig(ctx context.Context, stdin io.Reader, stdout io.Writer, dial 
 			return ctx.Err()
 		}
 
-		logger.Debug("daemon disconnected, reconnecting", "error", err)
-		fmt.Fprintln(os.Stderr, "mcp-proxy: daemon disconnected, reconnecting...")
+		logger.Warn("Daemon connection interrupted; reconnecting", "reason", transport.FailureReason(err))
 	}
 }
 
@@ -193,7 +192,7 @@ func runConnection(
 						if connCtx.Err() != nil {
 							return
 						}
-						logger.Debug("ping failed, forcing reconnect", "error", err)
+						logger.Debug("Daemon keepalive ping failed")
 						connCancel()
 						return
 					}
@@ -226,7 +225,7 @@ func runConnection(
 					ID json.RawMessage `json:"id"`
 				}
 				if json.Unmarshal(msg, &env) == nil && bytes.Equal(env.ID, swallowID) {
-					logger.Debug("swallowed replayed initialize response", "id", string(swallowID))
+					logger.Debug("Suppressed replayed initialize response")
 					continue
 				}
 				// Not the one we're looking for — put the ID back.
@@ -263,6 +262,7 @@ func runConnection(
 			}
 			connCancel()
 			<-readerDone
+			logger.Info("Handshake replay finished", "outcome", "failure")
 			return pending, fmt.Errorf("writing replayed initialize: %w", err)
 		}
 		if hs.initialized != nil {
@@ -273,10 +273,11 @@ func runConnection(
 				}
 				connCancel()
 				<-readerDone
+				logger.Info("Handshake replay finished", "outcome", "failure")
 				return pending, fmt.Errorf("writing replayed initialized: %w", err)
 			}
 		}
-		logger.Debug("handshake replayed")
+		logger.Info("Handshake replay finished", "outcome", "success")
 	}
 
 	// Writer: channel -> daemon. Runs in this goroutine.

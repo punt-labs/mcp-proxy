@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/punt-labs/mcp-proxy/internal/debuglog"
 	"github.com/punt-labs/mcp-proxy/internal/hook"
 	"github.com/punt-labs/mcp-proxy/internal/testutil"
 	"github.com/punt-labs/mcp-proxy/internal/transport"
@@ -28,7 +28,7 @@ func TestSyncRequestResponse(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	logger := debuglog.Nop()
+	logger := slog.New(slog.DiscardHandler)
 	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, "", logger)
 	require.NoError(t, err)
 	conn.SetReadLimit(1024 * 1024)
@@ -55,7 +55,7 @@ func TestSyncErrorResponse(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	logger := debuglog.Nop()
+	logger := slog.New(slog.DiscardHandler)
 	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, "", logger)
 	require.NoError(t, err)
 	conn.SetReadLimit(1024 * 1024)
@@ -79,7 +79,7 @@ func TestAsyncFireAndForget(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	logger := debuglog.Nop()
+	logger := slog.New(slog.DiscardHandler)
 	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, "", logger)
 	require.NoError(t, err)
 	conn.SetReadLimit(1024 * 1024)
@@ -135,7 +135,7 @@ func TestStdinPayloadPassthrough(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	logger := debuglog.Nop()
+	logger := slog.New(slog.DiscardHandler)
 	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, "", logger)
 	require.NoError(t, err)
 	conn.SetReadLimit(1024 * 1024)
@@ -162,7 +162,7 @@ func TestEmptyStdin(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	logger := debuglog.Nop()
+	logger := slog.New(slog.DiscardHandler)
 	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, "", logger)
 	require.NoError(t, err)
 	conn.SetReadLimit(1024 * 1024)
@@ -200,7 +200,7 @@ func TestEventNamePassthrough(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			logger := debuglog.Nop()
+			logger := slog.New(slog.DiscardHandler)
 			conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, "", logger)
 			require.NoError(t, err)
 			conn.SetReadLimit(1024 * 1024)
@@ -237,7 +237,7 @@ func TestLargePayload(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	logger := debuglog.Nop()
+	logger := slog.New(slog.DiscardHandler)
 	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, "", logger)
 	require.NoError(t, err)
 	conn.SetReadLimit(1024 * 1024)
@@ -265,7 +265,7 @@ func TestAsyncDeliveryGuarantee(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	logger := debuglog.Nop()
+	logger := slog.New(slog.DiscardHandler)
 	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, "", logger)
 	require.NoError(t, err)
 	conn.SetReadLimit(1024 * 1024)
@@ -307,7 +307,7 @@ func TestNoEOFStdinDoesNotHang(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	logger := debuglog.Nop()
+	logger := slog.New(slog.DiscardHandler)
 	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, "", logger)
 	require.NoError(t, err)
 	conn.SetReadLimit(1024 * 1024)
@@ -349,7 +349,7 @@ func TestEmptyStdinNoEOF(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	logger := debuglog.Nop()
+	logger := slog.New(slog.DiscardHandler)
 	conn, err := transport.DialHook(ctx, d.HookURL(), 42, nil, "", logger)
 	require.NoError(t, err)
 	conn.SetReadLimit(1024 * 1024)

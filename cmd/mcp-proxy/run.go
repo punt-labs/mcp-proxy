@@ -5,24 +5,21 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	"github.com/punt-labs/mcp-proxy/internal/debuglog"
 	"github.com/punt-labs/mcp-proxy/internal/hook"
 	"github.com/punt-labs/mcp-proxy/internal/reconnect"
 	"github.com/punt-labs/mcp-proxy/internal/session"
 	"github.com/punt-labs/mcp-proxy/internal/transport"
 )
 
-// runHealthCheck dials, closes, and returns. Preserves the pre-migration
-// behavior verbatim (repo-root main.go:193-209).
-func runHealthCheck(ctx context.Context, rawURL string, extraHeaders map[string]string, caCert string, stderr io.Writer) error {
-	logger := debuglog.Nop()
-
+// runHealthCheck dials, closes, and reports the result.
+func runHealthCheck(ctx context.Context, rawURL string, extraHeaders map[string]string, caCert string, stderr io.Writer, logger *slog.Logger) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -31,7 +28,7 @@ func runHealthCheck(ctx context.Context, rawURL string, extraHeaders map[string]
 	dialCtx, cancel := context.WithTimeout(ctx, transport.DialTimeout+time.Second)
 	defer cancel()
 
-	conn, err := transport.Dial(dialCtx, rawURL, 0, extraHeaders, caCert, logger)
+	conn, err := transport.Dial(dialCtx, rawURL, 0, extraHeaders, caCert, logger.With("component", toolName+".transport"))
 	if err != nil {
 		return fmt.Errorf("health check failed: %w", err)
 	}
@@ -42,19 +39,15 @@ func runHealthCheck(ctx context.Context, rawURL string, extraHeaders map[string]
 
 // runProxy runs the long-lived bridge. Signal handling is inside this
 // function, not at the cobra layer (DES-008).
-func runProxy(rawURL string, extraHeaders map[string]string, caCert string, stdin io.Reader, stdout, stderr io.Writer) error {
-	logger, logCloser := debuglog.FromEnv()
-	defer func() { _ = logCloser.Close() }()
-
+func runProxy(rawURL string, extraHeaders map[string]string, caCert string, stdin io.Reader, stdout, stderr io.Writer, logger *slog.Logger) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 	go forceExitOnSecondSignal(ctx, stderr)
 
 	sessionKey := session.FindSessionKey()
-	logger.Debug("session key resolved", "key", sessionKey)
-
+	dialLogger := logger.With("component", toolName+".transport")
 	dial := func(dialCtx context.Context) (reconnect.Conn, error) {
-		conn, err := transport.Dial(dialCtx, rawURL, sessionKey, extraHeaders, caCert, logger)
+		conn, err := transport.Dial(dialCtx, rawURL, sessionKey, extraHeaders, caCert, dialLogger)
 		if err != nil {
 			return nil, err
 		}
@@ -63,24 +56,18 @@ func runProxy(rawURL string, extraHeaders map[string]string, caCert string, stdi
 	}
 
 	cfg := reconnect.Config{
-		PingInterval: envDuration("MCP_PROXY_PING_INTERVAL", 5*time.Second, stderr),
-		PongTimeout:  envDuration("MCP_PROXY_PONG_TIMEOUT", 2*time.Second, stderr),
+		PingInterval: envDuration("MCP_PROXY_PING_INTERVAL", 5*time.Second, logger),
+		PongTimeout:  envDuration("MCP_PROXY_PONG_TIMEOUT", 2*time.Second, logger),
 	}
 	logger.Debug("config", "ping_interval", cfg.PingInterval, "pong_timeout", cfg.PongTimeout)
 
-	if err := reconnect.RunWithConfig(ctx, stdin, stdout, dial, cfg, logger); err != nil {
-		return err
-	}
-	return nil
+	return reconnect.RunWithConfig(ctx, stdin, stdout, dial, cfg, logger.With("component", toolName+".reconnect"))
 }
 
-// runHook does the one-shot hook relay. Preserves repo-root main.go:248-297 verbatim.
-func runHook(rawURL, event string, async bool, extraHeaders map[string]string, caCert string, stdin io.Reader, stdout, stderr io.Writer) error {
-	logger, logCloser := debuglog.FromEnv()
-	defer func() { _ = logCloser.Close() }()
-
+// runHook does the one-shot hook relay.
+func runHook(rawURL, event string, async bool, extraHeaders map[string]string, caCert string, stdin io.Reader, stdout, stderr io.Writer, logger *slog.Logger) error {
 	sessionKey := session.FindSessionKey()
-	logger.Debug("hook mode", "event", event, "async", async, "session_key", sessionKey)
+	logger.Debug("Preparing hook relay", "async", async)
 
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -95,7 +82,7 @@ func runHook(rawURL, event string, async bool, extraHeaders map[string]string, c
 	dialCtx, dialCancel := context.WithTimeout(context.Background(), transport.DialTimeout+time.Second)
 	defer dialCancel()
 
-	conn, err := transport.DialHook(dialCtx, hookURL, sessionKey, extraHeaders, caCert, logger)
+	conn, err := transport.DialHook(dialCtx, hookURL, sessionKey, extraHeaders, caCert, logger.With("component", toolName+".transport"))
 	if err != nil {
 		return err
 	}
@@ -127,20 +114,16 @@ func forceExitOnSecondSignal(ctx context.Context, stderr io.Writer) {
 }
 
 // envDuration reads a duration from an environment variable. Accepts Go
-// duration strings (e.g. "5s", "500ms"). Warns to stderr on parse errors
+// duration strings (e.g. "5s", "500ms"). Warns on parse errors
 // or negative values. Zero is allowed.
-func envDuration(key string, fallback time.Duration, stderr io.Writer) time.Duration {
+func envDuration(key string, fallback time.Duration, logger *slog.Logger) time.Duration {
 	v := os.Getenv(key)
 	if v == "" {
 		return fallback
 	}
 	d, err := time.ParseDuration(v)
-	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "mcp-proxy: invalid %s=%q, using default %s\n", key, v, fallback)
-		return fallback
-	}
-	if d < 0 {
-		_, _ = fmt.Fprintf(stderr, "mcp-proxy: negative %s=%s, using default %s\n", key, v, fallback)
+	if err != nil || d < 0 {
+		logger.Warn("Rejected duration setting; using default", "setting", key, "default", fallback)
 		return fallback
 	}
 	return d
