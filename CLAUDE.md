@@ -46,15 +46,16 @@ The proxy is transparent — it doesn't know what MCP tools exist. JSON-RPC mess
 | `internal/reconnect` | Reconnecting bridge: stdin channel, per-connection goroutines, backoff, MCP handshake replay |
 | `internal/transport` | WebSocket dial with typed errors, session key injection, bearer token auth |
 | `internal/session` | Process-tree walking to resolve Claude session key |
-| `internal/debuglog` | Structured `slog` debug logging via `MCP_PROXY_DEBUG` env var |
+| `cmd/mcp-proxy/observe.go` | Shared private diagnostics and local usage telemetry |
 | `internal/testutil` | Mock daemon (`httptest.Server` + WebSocket), stdio pipe helpers |
 | `internal/e2e` | Black-box binary tests (build tag `e2e`) |
 | `internal/integration` | Real daemon roundtrip tests (build tag `integration`) |
 
 ## Go Standards
 
-- **Go 1.25+**. Module path: `github.com/punt-labs/mcp-proxy`.
+- **Go 1.26+**. Module path: `github.com/punt-labs/mcp-proxy`.
 - **No external dependencies** unless there is a strong reason. The proxy must be a static binary with minimal attack surface. If WebSocket is chosen, `github.com/coder/websocket` is acceptable — evaluate against DIY NDJSON over Unix socket first.
+- `github.com/punt-labs/punt-observe-go` provides the required shared observability stack (DES-018). Its pure-Go SQLite driver is used directly only by the end-to-end store assertions.
 - **Table-driven tests** with `testify/assert` and `testify/require`.
 - **No `interface{}` or `any` in public API** unless unavoidable.
 - **Errors are values, not strings.** Use typed errors for conditions callers need to distinguish. Wrap with `fmt.Errorf("context: %w", err)` for everything else.

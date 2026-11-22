@@ -16,6 +16,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Proxy, hook, and health diagnostics now use a private, shared rotating
+  log at `~/.punt-labs/mcp-proxy/logs/mcp-proxy.log`. `MCP_PROXY_DEBUG=1`
+  or `true` enables DEBUG in that file instead of selecting a separate path.
+  Startup warns once on stderr and continues without file diagnostics if the
+  shared rotation lock cannot be acquired within two seconds.
+- Usage telemetry records operation duration and outcome in a private local
+  SQLite store; it can be disabled independently of diagnostic logging.
 - Linear is the tracker of record (Punt Labs team, label `repo:mcp`).
   The beads tracker is removed: `.beads/`, the `BEADS_*` block in
   `.envrc`, the `bd` gitattributes merge driver, the `bd` permission

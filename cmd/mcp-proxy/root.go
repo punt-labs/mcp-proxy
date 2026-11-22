@@ -153,27 +153,42 @@ func dispatch(ctx context.Context, f *flags, configSet, hookSet bool, args []str
 		return &usageError{msg: "daemon URL required (or use --config)"}
 	}
 
-	var prof config.Profile
-	if f.profile != "" {
-		p, err := config.Load(f.profile)
-		if err != nil {
-			return err
-		}
-		prof = p
-	}
-
-	daemonURL := resolveURL(args, prof)
-	extraHeaders := prof.Headers
-	caCert := prof.CACert
-
+	role := "proxy"
 	switch {
 	case f.health:
-		return runHealthCheck(ctx, daemonURL, extraHeaders, caCert, stderr)
+		role = "health"
 	case f.hookEvent != "":
-		return runHook(daemonURL, f.hookEvent, f.hookAsync, extraHeaders, caCert, stdin, stdout, stderr)
-	default:
-		return runProxy(daemonURL, extraHeaders, caCert, stdin, stdout, stderr)
+		role = "hook"
 	}
+	logger, closeDiagnostics := openDiagnostics(role, stderr)
+	defer closeDiagnostics()
+
+	settings, err := config.LoadTelemetry()
+	if err != nil {
+		logger.Warn("Could not load telemetry settings; disabling capture", "file", "telemetry.conf")
+		settings.Disabled = true
+	}
+	return observeOperation(logger, role, settings, func() error {
+		var prof config.Profile
+		if f.profile != "" {
+			p, err := config.Load(f.profile)
+			if err != nil {
+				return &profileRejectedError{err: err}
+			}
+			prof = p
+		}
+		daemonURL := resolveURL(args, prof)
+		extraHeaders := prof.Headers
+		caCert := prof.CACert
+		switch role {
+		case "health":
+			return runHealthCheck(ctx, daemonURL, extraHeaders, caCert, stderr, logger)
+		case "hook":
+			return runHook(daemonURL, f.hookEvent, f.hookAsync, extraHeaders, caCert, stdin, stdout, stderr, logger)
+		default:
+			return runProxy(daemonURL, extraHeaders, caCert, stdin, stdout, stderr, logger)
+		}
+	})
 }
 
 // resolveURL applies the three-tier precedence: positional arg beats
@@ -201,8 +216,9 @@ Flags:
 {{.LocalFlags.FlagUsages}}
 Environment:
   MCP_PROXY_TOKEN          Bearer token added to the WebSocket upgrade
-  MCP_PROXY_DEBUG          1|true to log to $TMPDIR/mcp-proxy-<pid>.log,
-                           any other value is treated as a file path
+  MCP_PROXY_DEBUG          1|true to enable DEBUG in the private log
+  PUNT_TELEMETRY           off to disable all Punt Labs telemetry
+  MCP_PROXY_TELEMETRY      off to disable mcp-proxy telemetry
   MCP_PROXY_PING_INTERVAL  WebSocket ping cadence (default 5s)
   MCP_PROXY_PONG_TIMEOUT   Pong wait after each ping (default 2s)
 

@@ -29,6 +29,9 @@ const ResponseTimeout = 30 * time.Second
 // The error details have already been printed to stderr by Run.
 var ErrDaemonError = errors.New("daemon returned error")
 
+// ErrInvalidPayload indicates the hook input is not valid JSON.
+var ErrInvalidPayload = errors.New("stdin is not valid JSON")
+
 // Stdin read timeouts. Claude Code pipes hook payloads to stdin but doesn't
 // always close the pipe promptly (biff DES-027). Without deadlines,
 // io.ReadAll blocks forever waiting for EOF.
@@ -74,7 +77,7 @@ func Run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, conn *w
 	var params json.RawMessage
 	if trimmed := bytes.TrimSpace(payload); len(trimmed) > 0 {
 		if !json.Valid(trimmed) {
-			return fmt.Errorf("stdin is not valid JSON")
+			return ErrInvalidPayload
 		}
 		params = json.RawMessage(trimmed)
 	}
@@ -98,7 +101,7 @@ func sendNotification(ctx context.Context, conn *websocket.Conn, method string, 
 		return fmt.Errorf("marshaling notification: %w", err)
 	}
 
-	logger.Debug("sending async notification", "method", method, "size", len(msg))
+	logger.Debug("Sending async notification", "size", len(msg))
 
 	if err := conn.Write(ctx, websocket.MessageText, msg); err != nil {
 		return fmt.Errorf("sending notification: %w", err)
@@ -125,7 +128,7 @@ func sendRequest(ctx context.Context, conn *websocket.Conn, method string, param
 		return fmt.Errorf("marshaling request: %w", err)
 	}
 
-	logger.Debug("sending sync request", "method", method, "size", len(msg))
+	logger.Debug("Sending sync request", "size", len(msg))
 
 	if err := conn.Write(ctx, websocket.MessageText, msg); err != nil {
 		return fmt.Errorf("sending request: %w", err)
@@ -140,7 +143,7 @@ func sendRequest(ctx context.Context, conn *websocket.Conn, method string, param
 
 		var resp response
 		if err := json.Unmarshal(data, &resp); err != nil {
-			logger.Debug("ignoring unparseable message", "error", err)
+			logger.Debug("Ignoring unparseable message")
 			continue
 		}
 
@@ -152,7 +155,7 @@ func sendRequest(ctx context.Context, conn *websocket.Conn, method string, param
 
 		// Match on id. We sent 1 — accept any JSON representation (1, 1.0, "1").
 		if !matchesID(resp.ID, id) {
-			logger.Debug("ignoring message with non-matching id", "id", string(resp.ID))
+			logger.Debug("Ignoring message with non-matching ID")
 			continue
 		}
 
@@ -226,7 +229,7 @@ func readStdin(r io.Reader, logger *slog.Logger) ([]byte, error) {
 	// assume stdin is empty and proceed with null params.
 	if err := dl.SetReadDeadline(time.Now().Add(stdinInitialTimeout)); err != nil {
 		// SetReadDeadline not supported on this fd. Fall back.
-		logger.Debug("SetReadDeadline failed, falling back to ReadAll", "error", err)
+		logger.Debug("Could not set stdin deadline; falling back to reading until EOF")
 		return io.ReadAll(r)
 	}
 
