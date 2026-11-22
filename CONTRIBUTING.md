@@ -2,7 +2,7 @@
 
 Development needs Go (the version in `go.mod`'s `toolchain` directive) and Node.js with `npx`, which `make docs` uses to run markdownlint. The Makefile fetches the pinned linters with `go run` on first use.
 
-Run the full quality gate before every commit. It runs `lint`, `lint-strict`, `vulncheck`, `docs`, and `test`:
+Commits are gated by the ethos commit-stage checks (`gofmt` and `go vet`, DES-019). Run the full quality gate before every push. It runs `lint`, `lint-strict`, `vulncheck`, `docs`, and `test`:
 
 ```bash
 make check
