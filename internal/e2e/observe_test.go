@@ -220,7 +220,7 @@ func TestDiagnosticsUnavailable_E2E(t *testing.T) {
 	require.NoError(t, os.WriteFile(logDir, nil, 0o600))
 
 	cmd := exec.CommandContext(t.Context(), bin, "--health", d.URL())
-	cmd.Env = append(os.Environ(), "HOME="+home, "PUNT_TELEMETRY=off")
+	cmd.Env = runtimeEnv(home)
 	stderr := &testutil.SafeBuffer{}
 	cmd.Stderr = stderr
 	out, err := cmd.Output()

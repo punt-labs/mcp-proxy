@@ -29,6 +29,17 @@ func binaryPath(t *testing.T) string {
 	return binPath
 }
 
+func runtimeCommand(t *testing.T, ctx context.Context, bin string, args ...string) *exec.Cmd {
+	t.Helper()
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Env = runtimeEnv(t.TempDir())
+	return cmd
+}
+
+func runtimeEnv(home string) []string {
+	return append(os.Environ(), "HOME="+home, "PUNT_TELEMETRY=off")
+}
+
 func findModuleRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -65,7 +76,7 @@ func TestProxy_E2E_RequestResponse(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, bin, d.URL())
+	cmd := runtimeCommand(t, ctx, bin, d.URL())
 	stdinPipe, err := cmd.StdinPipe()
 	require.NoError(t, err)
 
@@ -97,7 +108,7 @@ func TestProxy_E2E_SessionKey(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, bin, d.URL())
+	cmd := runtimeCommand(t, ctx, bin, d.URL())
 	stdinPipe, err := cmd.StdinPipe()
 	require.NoError(t, err)
 
@@ -122,7 +133,7 @@ func TestProxy_E2E_SessionKey(t *testing.T) {
 func TestProxy_E2E_NoArgs(t *testing.T) {
 	bin := binaryPath(t)
 
-	cmd := exec.Command(bin)
+	cmd := runtimeCommand(t, t.Context(), bin)
 	stderr := &testutil.SafeBuffer{}
 	cmd.Stderr = stderr
 
@@ -140,7 +151,7 @@ func TestProxy_E2E_ConnectionRefused_Reconnects(t *testing.T) {
 
 	home := t.TempDir()
 	cmd := exec.CommandContext(ctx, bin, "ws://127.0.0.1:1/mcp")
-	cmd.Env = append(os.Environ(), "HOME="+home, "PUNT_TELEMETRY=off")
+	cmd.Env = runtimeEnv(home)
 	cmd.Stdin = strings.NewReader("")
 
 	stderr := &testutil.SafeBuffer{}
@@ -160,7 +171,7 @@ func TestProxy_E2E_HealthCheckSuccess(t *testing.T) {
 	d := testutil.NewMockDaemon()
 	defer d.Close()
 
-	cmd := exec.Command(bin, "--health", d.URL())
+	cmd := runtimeCommand(t, t.Context(), bin, "--health", d.URL())
 	stderr := &testutil.SafeBuffer{}
 	cmd.Stderr = stderr
 
@@ -172,7 +183,7 @@ func TestProxy_E2E_HealthCheckSuccess(t *testing.T) {
 func TestProxy_E2E_HealthCheckFailure(t *testing.T) {
 	bin := binaryPath(t)
 
-	cmd := exec.Command(bin, "--health", "ws://127.0.0.1:1/mcp")
+	cmd := runtimeCommand(t, t.Context(), bin, "--health", "ws://127.0.0.1:1/mcp")
 	stderr := &testutil.SafeBuffer{}
 	cmd.Stderr = stderr
 
@@ -187,7 +198,7 @@ func TestProxy_E2E_HealthCheckFailure(t *testing.T) {
 func TestProxy_E2E_HealthCheckNoURL(t *testing.T) {
 	bin := binaryPath(t)
 
-	cmd := exec.Command(bin, "--health")
+	cmd := runtimeCommand(t, t.Context(), bin, "--health")
 	stderr := &testutil.SafeBuffer{}
 	cmd.Stderr = stderr
 
@@ -207,7 +218,7 @@ func TestProxy_E2E_MultipleMessages(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, bin, d.URL())
+	cmd := runtimeCommand(t, ctx, bin, d.URL())
 	stdinPipe, err := cmd.StdinPipe()
 	require.NoError(t, err)
 
@@ -240,7 +251,7 @@ func TestHook_E2E_SyncSuccess(t *testing.T) {
 		return []byte(`{"jsonrpc":"2.0","id":1,"result":{"decision":"allow"}}`)
 	}
 
-	cmd := exec.Command(bin, d.BaseURL(), "--hook", "PreToolUse")
+	cmd := runtimeCommand(t, t.Context(), bin, d.BaseURL(), "--hook", "PreToolUse")
 	cmd.Stdin = strings.NewReader(`{"tool":"bash","input":"ls"}`)
 
 	stdout := &testutil.SafeBuffer{}
@@ -263,7 +274,7 @@ func TestHook_E2E_SyncExplicitHookPath(t *testing.T) {
 	}
 
 	// Pass explicit /hook path — should NOT double to /hook/hook.
-	cmd := exec.Command(bin, d.HookURL(), "--hook", "PreToolUse")
+	cmd := runtimeCommand(t, t.Context(), bin, d.HookURL(), "--hook", "PreToolUse")
 	cmd.Stdin = strings.NewReader(`{"tool":"bash","input":"ls"}`)
 
 	stdout := &testutil.SafeBuffer{}
@@ -281,7 +292,7 @@ func TestHook_E2E_AsyncSuccess(t *testing.T) {
 	d := testutil.NewMockDaemon()
 	defer d.Close()
 
-	cmd := exec.Command(bin, d.BaseURL(), "--hook", "--async", "SessionEnd")
+	cmd := runtimeCommand(t, t.Context(), bin, d.BaseURL(), "--hook", "--async", "SessionEnd")
 	cmd.Stdin = strings.NewReader(`{"session":"test123"}`)
 
 	stderr := &testutil.SafeBuffer{}
@@ -308,7 +319,7 @@ func TestHook_E2E_AsyncSuccess(t *testing.T) {
 func TestHook_E2E_ConnectionRefused(t *testing.T) {
 	bin := binaryPath(t)
 
-	cmd := exec.Command(bin, "ws://127.0.0.1:1", "--hook", "PreToolUse")
+	cmd := runtimeCommand(t, t.Context(), bin, "ws://127.0.0.1:1", "--hook", "PreToolUse")
 	cmd.Stdin = strings.NewReader(`{}`)
 
 	stderr := &testutil.SafeBuffer{}
@@ -325,7 +336,7 @@ func TestHook_E2E_ConnectionRefused(t *testing.T) {
 func TestHook_E2E_MissingEvent(t *testing.T) {
 	bin := binaryPath(t)
 
-	cmd := exec.Command(bin, "ws://localhost:8080", "--hook")
+	cmd := runtimeCommand(t, t.Context(), bin, "ws://localhost:8080", "--hook")
 	stderr := &testutil.SafeBuffer{}
 	cmd.Stderr = stderr
 

@@ -22,7 +22,7 @@ func TestCLI_E2E_Help(t *testing.T) {
 	bin := binaryPath(t)
 	for _, argv := range [][]string{{"--help"}, {"-h"}} {
 		t.Run(strings.Join(argv, " "), func(t *testing.T) {
-			cmd := exec.Command(bin, argv...)
+			cmd := runtimeCommand(t, t.Context(), bin, argv...)
 			var stdout, stderr testutil.SafeBuffer
 			cmd.Stdout = &stdout
 			cmd.Stderr = &stderr
@@ -37,7 +37,7 @@ func TestCLI_E2E_Help(t *testing.T) {
 // TestCLI_E2E_VersionFlag exercises `mcp-proxy --version`.
 func TestCLI_E2E_VersionFlag(t *testing.T) {
 	bin := binaryPath(t)
-	cmd := exec.Command(bin, "--version")
+	cmd := runtimeCommand(t, t.Context(), bin, "--version")
 	var stdout, stderr testutil.SafeBuffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -53,7 +53,7 @@ func TestCLI_E2E_VersionFlag(t *testing.T) {
 // TestCLI_E2E_VersionSubcommand exercises `mcp-proxy version`.
 func TestCLI_E2E_VersionSubcommand(t *testing.T) {
 	bin := binaryPath(t)
-	cmd := exec.Command(bin, "version")
+	cmd := runtimeCommand(t, t.Context(), bin, "version")
 	var stdout, stderr testutil.SafeBuffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -72,7 +72,7 @@ func TestCLI_E2E_VersionSubcommand(t *testing.T) {
 // list.
 func TestCLI_E2E_UnknownFlag(t *testing.T) {
 	bin := binaryPath(t)
-	cmd := exec.Command(bin, "--nonsense")
+	cmd := runtimeCommand(t, t.Context(), bin, "--nonsense")
 	var stdout, stderr testutil.SafeBuffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -101,7 +101,7 @@ func TestCLI_E2E_CobraArgsErrors(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			cmd := exec.Command(bin, tc.argv...)
+			cmd := runtimeCommand(t, t.Context(), bin, tc.argv...)
 			var stdout, stderr testutil.SafeBuffer
 			cmd.Stdout = &stdout
 			cmd.Stderr = &stderr
@@ -124,7 +124,7 @@ func TestCLI_E2E_CobraArgsErrors(t *testing.T) {
 // error they asked for.
 func TestCLI_E2E_EmptyHook(t *testing.T) {
 	bin := binaryPath(t)
-	cmd := exec.Command(bin, "--hook", "", "ws://127.0.0.1:1")
+	cmd := runtimeCommand(t, t.Context(), bin, "--hook", "", "ws://127.0.0.1:1")
 	var stdout, stderr testutil.SafeBuffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -157,7 +157,7 @@ func TestCLI_E2E_FlagShapedValues(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			cmd := exec.Command(bin, tc.argv...)
+			cmd := runtimeCommand(t, t.Context(), bin, tc.argv...)
 			var stdout, stderr testutil.SafeBuffer
 			cmd.Stdout = &stdout
 			cmd.Stderr = &stderr
@@ -180,7 +180,7 @@ func TestCLI_E2E_FlagShapedValues(t *testing.T) {
 // separate ADR — this test pins today's shape.
 func TestCLI_E2E_MissingConfigProfile(t *testing.T) {
 	bin := binaryPath(t)
-	cmd := exec.Command(bin, "--config", "nope-does-not-exist", "--health")
+	cmd := runtimeCommand(t, t.Context(), bin, "--config", "nope-does-not-exist", "--health")
 	var stdout, stderr testutil.SafeBuffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
