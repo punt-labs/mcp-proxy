@@ -18,6 +18,11 @@ import (
 
 const toolName = "mcp-proxy"
 
+type profileRejectedError struct{ err error }
+
+func (e *profileRejectedError) Error() string { return e.err.Error() }
+func (e *profileRejectedError) Unwrap() error { return e.err }
+
 func openDiagnostics(role string, stderr io.Writer) (*slog.Logger, func()) {
 	level := slog.LevelInfo
 	if debug := os.Getenv("MCP_PROXY_DEBUG"); debug == "1" || debug == "true" {
@@ -61,7 +66,10 @@ func observeOperation(logger *slog.Logger, role string, settings config.Telemetr
 	err := run()
 	duration := time.Since(start)
 	outcome := success
+	var profileErr *profileRejectedError
 	switch {
+	case errors.As(err, &profileErr):
+		outcome = failure
 	case errors.Is(err, context.Canceled):
 		outcome = canceled
 	case err != nil:
@@ -77,7 +85,11 @@ func observeOperation(logger *slog.Logger, role string, settings config.Telemetr
 			logger.Error("Operation failed unexpectedly", "reason", transport.FailureReason(err))
 		}
 	}
-	logger.Info("Operation finished", "outcome", string(outcome))
+	if profileErr != nil {
+		logger.Warn("Operation finished", "outcome", string(outcome), "reason", "profile_rejected")
+	} else {
+		logger.Info("Operation finished", "outcome", string(outcome))
+	}
 	client.Record(telemetry.Observation{
 		Name: name, Version: 1, Started: start, Duration: duration,
 		Attributes: []telemetry.Value{telemetry.EnumValue("outcome", outcome)},

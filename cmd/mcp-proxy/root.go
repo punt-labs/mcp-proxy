@@ -173,8 +173,7 @@ func dispatch(ctx context.Context, f *flags, configSet, hookSet bool, args []str
 		if f.profile != "" {
 			p, err := config.Load(f.profile)
 			if err != nil {
-				logger.Warn("Rejected profile configuration")
-				return err
+				return &profileRejectedError{err: err}
 			}
 			prof = p
 		}

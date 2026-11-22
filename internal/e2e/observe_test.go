@@ -143,11 +143,13 @@ func TestObservability_E2E(t *testing.T) {
 		"[DEBUG] mcp-proxy.transport: Daemon rejected WebSocket authorization status=401",
 		"[ERROR] mcp-proxy.health: Operation failed unexpectedly reason=authorization_rejected",
 		"[INFO] mcp-proxy.health: Operation finished outcome=failure",
-		"[WARNING] mcp-proxy.proxy: Rejected profile configuration",
-		"[INFO] mcp-proxy.proxy: Operation finished outcome=failure",
 	} {
 		assert.Contains(t, string(diagnostics), line)
 	}
+	assert.Equal(t, 1, strings.Count(string(diagnostics), "mcp-proxy.proxy: Operation finished outcome=failure"))
+	assert.Contains(t, string(diagnostics), "[WARNING] mcp-proxy.proxy: Operation finished outcome=failure reason=profile_rejected")
+	assert.NotContains(t, string(diagnostics), "mcp-proxy.proxy: Operation failed unexpectedly")
+	assert.NotContains(t, string(diagnostics), "mcp-proxy.proxy: Rejected profile configuration")
 	t.Logf("Diagnostics:\n%s", diagnostics)
 	checkUsage(t, stateDir)
 }
