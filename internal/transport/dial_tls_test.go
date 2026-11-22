@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/punt-labs/mcp-proxy/internal/debuglog"
+	"github.com/punt-labs/mcp-proxy/internal/testutil"
 	"github.com/punt-labs/mcp-proxy/internal/transport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -121,7 +121,7 @@ func TestDial_EmptyCACert_NoCustomTLS(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	logger := debuglog.NewTestLogger(t).Logger
+	logger := testutil.NewTestLogger(t).Logger
 	conn, err := transport.Dial(ctx, rawURL, 1, nil, "", logger)
 	require.NoError(t, err)
 	conn.Close(websocket.StatusNormalClosure, "")
@@ -141,7 +141,7 @@ func TestDial_ValidCACert_CustomPoolUsed(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	logger := debuglog.NewTestLogger(t).Logger
+	logger := testutil.NewTestLogger(t).Logger
 	conn, err := transport.Dial(ctx, wsURL(srv.URL)+"/", 1, nil, caFile, logger)
 	require.NoError(t, err)
 
@@ -161,7 +161,7 @@ func TestDial_MissingCACertFile_Error(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	logger := debuglog.NewTestLogger(t).Logger
+	logger := testutil.NewTestLogger(t).Logger
 	// Use a real wss URL; the error should occur before the dial attempt
 	// when the cert file cannot be read.
 	_, err := transport.Dial(ctx, "wss://127.0.0.1:9999/mcp", 1, nil, "/no/such/file.crt", logger)
@@ -182,7 +182,7 @@ func TestDial_InvalidCACertPEM_Error(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	logger := debuglog.NewTestLogger(t).Logger
+	logger := testutil.NewTestLogger(t).Logger
 	_, err := transport.Dial(ctx, "wss://127.0.0.1:9999/mcp", 1, nil, badFile, logger)
 	require.Error(t, err)
 
@@ -208,7 +208,7 @@ func TestDial_WrongCACert_Rejected(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	logger := debuglog.NewTestLogger(t).Logger
+	logger := testutil.NewTestLogger(t).Logger
 	_, err := transport.Dial(ctx, wsURL(srv.URL)+"/", 1, nil, caFile, logger)
 	require.Error(t, err)
 
@@ -235,7 +235,7 @@ func TestDialHook_WrongCACert_Rejected(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	logger := debuglog.NewTestLogger(t).Logger
+	logger := testutil.NewTestLogger(t).Logger
 	_, err := transport.DialHook(ctx, wsURL(srv.URL)+"/", 1, nil, caFile, logger)
 	require.Error(t, err)
 

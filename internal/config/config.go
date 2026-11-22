@@ -30,6 +30,35 @@ type Profile struct {
 	CACert string
 }
 
+// Telemetry holds user-owned settings separate from generated daemon profiles.
+type Telemetry struct {
+	Disabled      bool `toml:"disabled"`
+	RetentionDays int  `toml:"retention_days"`
+}
+
+// LoadTelemetry reads optional settings from ~/.punt-labs/mcp-proxy/telemetry.conf.
+func LoadTelemetry() (Telemetry, error) {
+	path, err := configPath("telemetry.conf")
+	if err != nil {
+		return Telemetry{}, fmt.Errorf("resolving telemetry settings path: %w", err)
+	}
+	var settings Telemetry
+	meta, err := toml.DecodeFile(path, &settings)
+	if errors.Is(err, os.ErrNotExist) {
+		return Telemetry{}, nil
+	}
+	if err != nil {
+		return Telemetry{}, fmt.Errorf("loading telemetry settings: %w", err)
+	}
+	if len(meta.Undecoded()) != 0 {
+		return Telemetry{}, errors.New("unknown telemetry settings")
+	}
+	if meta.IsDefined("retention_days") && (settings.RetentionDays < 1 || settings.RetentionDays > 3650) {
+		return Telemetry{}, errors.New("telemetry retention must be between 1 and 3650 days")
+	}
+	return settings, nil
+}
+
 // InsecurePermissionsError is returned when the config file has permissions
 // that allow group or other access (any bit beyond owner read/write is set).
 type InsecurePermissionsError struct {
@@ -53,7 +82,7 @@ func Load(profile string) (Profile, error) {
 		return Profile{}, fmt.Errorf("invalid profile name %q: only letters, digits, hyphens, and underscores are allowed", profile)
 	}
 
-	path, err := profilePath(profile)
+	path, err := configPath(profile + ".toml")
 	if err != nil {
 		return Profile{}, fmt.Errorf("resolving config path: %w", err)
 	}
@@ -111,13 +140,12 @@ func Load(profile string) (Profile, error) {
 	return Profile(wp), nil
 }
 
-// profilePath returns the absolute path for a profile's config file.
-func profilePath(profile string) (string, error) {
+func configPath(filename string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".punt-labs", "mcp-proxy", profile+".toml"), nil
+	return filepath.Join(home, ".punt-labs", "mcp-proxy", filename), nil
 }
 
 // tilde replaces the home directory prefix with "~" for display in error

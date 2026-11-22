@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -133,11 +134,13 @@ func TestProxy_E2E_NoArgs(t *testing.T) {
 func TestProxy_E2E_ConnectionRefused_Reconnects(t *testing.T) {
 	bin := binaryPath(t)
 
-	// 1s is enough: reconnect logs "retrying in ..." immediately after the first dial failure.
+	// Reconnect logs its retry decision immediately after the first dial failure.
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
+	home := t.TempDir()
 	cmd := exec.CommandContext(ctx, bin, "ws://127.0.0.1:1/mcp")
+	cmd.Env = append(os.Environ(), "HOME="+home, "PUNT_TELEMETRY=off")
 	cmd.Stdin = strings.NewReader("")
 
 	stderr := &testutil.SafeBuffer{}
@@ -145,8 +148,11 @@ func TestProxy_E2E_ConnectionRefused_Reconnects(t *testing.T) {
 
 	_ = cmd.Run()
 	// With reconnect, the proxy retries until the context times out.
-	// Verify it printed retry messages to stderr.
-	assert.Contains(t, stderr.String(), "retrying")
+	// Verify the retry was written to the diagnostic file, not stderr.
+	record, err := os.ReadFile(filepath.Join(home, ".punt-labs", "mcp-proxy", "logs", "mcp-proxy.log"))
+	require.NoError(t, err)
+	assert.Contains(t, string(record), "Daemon connection failed; retrying reason=connection_refused")
+	assert.Empty(t, stderr.String())
 }
 
 func TestProxy_E2E_HealthCheckSuccess(t *testing.T) {

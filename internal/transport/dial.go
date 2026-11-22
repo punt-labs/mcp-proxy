@@ -73,6 +73,30 @@ func (e *InvalidURLError) Unwrap() error {
 	return e.Err
 }
 
+// FailureReason classifies errors without logging addresses, URLs or peer text.
+func FailureReason(err error) string {
+	var refused *ConnectionRefusedError
+	var timeout *TimeoutError
+	var invalid *InvalidURLError
+	var ca *CACertError
+	switch {
+	case errors.As(err, &refused):
+		return "connection_refused"
+	case errors.As(err, &timeout), errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	case errors.As(err, &invalid):
+		return "invalid_url"
+	case errors.As(err, &ca):
+		return "ca_certificate"
+	case websocket.CloseStatus(err) != -1:
+		return "websocket_closed"
+	case errors.Is(err, io.EOF):
+		return "unexpected_eof"
+	default:
+		return "unclassified"
+	}
+}
+
 // Dial connects to the daemon at rawURL with the MCP subprotocol,
 // passing sessionKey as a query parameter. Returns the WebSocket connection
 // or a typed error.
@@ -115,8 +139,6 @@ func dial(ctx context.Context, rawURL string, sessionKey int, subprotocols []str
 	q := u.Query()
 	q.Set("session_key", fmt.Sprintf("%d", sessionKey))
 	u.RawQuery = q.Encode()
-
-	logger.Debug("dialing daemon", "host", u.Host, "session_key", sessionKey)
 
 	dialCtx, cancel := context.WithTimeout(ctx, DialTimeout)
 	defer cancel()
@@ -169,13 +191,16 @@ func dial(ctx context.Context, rawURL string, sessionKey int, subprotocols []str
 			t.TLSClientConfig = tlsCfg
 			opts.HTTPClient = &http.Client{Transport: t}
 		}
-		logger.Debug("using custom CA cert", "path", caCertPath)
+		logger.Debug("Using custom CA certificate")
 	} else if caCertPath != "" {
 		logger.Debug("ignoring ca_cert for non-TLS scheme", "scheme", u.Scheme)
 	}
 
 	conn, resp, err := websocket.Dial(dialCtx, u.String(), opts)
 	if err != nil {
+		if resp != nil && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
+			logger.Warn("Daemon rejected WebSocket authorization", "status", resp.StatusCode)
+		}
 		// coder/websocket returns a non-nil *http.Response when the HTTP upgrade
 		// fails with a real HTTP reply. Drain and close the Body so net/http can
 		// return the underlying TCP connection to its idle pool for reuse
@@ -191,28 +216,27 @@ func dial(ctx context.Context, rawURL string, sessionKey int, subprotocols []str
 			if netErr.Op == "dial" {
 				var dnsErr *net.DNSError
 				if errors.As(netErr.Err, &dnsErr) || isConnectionRefused(netErr.Err) {
-					logger.Debug("dial failed", "reason", "connection refused", "addr", addr)
+					logger.Debug("Daemon dial failed", "reason", "connection_refused")
 					return nil, &ConnectionRefusedError{Addr: addr}
 				}
 			}
 		}
 
 		if errors.Is(err, context.DeadlineExceeded) || isTimeout(err) {
-			logger.Debug("dial failed", "reason", "timeout", "addr", addr)
+			logger.Debug("Daemon dial failed", "reason", "timeout")
 			return nil, &TimeoutError{Addr: addr}
 		}
 
 		// Connection refused shows up in different ways depending on platform.
 		if isConnectionRefused(err) {
-			logger.Debug("dial failed", "reason", "connection refused", "addr", addr)
+			logger.Debug("Daemon dial failed", "reason", "connection_refused")
 			return nil, &ConnectionRefusedError{Addr: addr}
 		}
 
-		logger.Debug("dial failed", "reason", "unknown", "addr", addr, "error", err)
+		logger.Debug("Daemon dial failed", "reason", "upgrade_or_transport")
 		return nil, fmt.Errorf("dialing %s: %w", addr, err)
 	}
 
-	logger.Debug("connected", "host", u.Host)
 	return conn, nil
 }
 
