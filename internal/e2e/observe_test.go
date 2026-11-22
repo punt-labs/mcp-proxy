@@ -105,6 +105,14 @@ func TestObservability_E2E(t *testing.T) {
 	assert.Equal(t, 1, exit.ExitCode())
 	assert.Empty(t, out)
 
+	require.NoError(t, os.WriteFile(filepath.Join(stateDir, "smoke.toml"), []byte("synthetic-profile-marker = ["), 0o600))
+	profile := exec.CommandContext(t.Context(), bin, "--config", "smoke")
+	profile.Env = env
+	out, err = profile.Output()
+	require.ErrorAs(t, err, &exit)
+	assert.Equal(t, 1, exit.ExitCode())
+	assert.Empty(t, out)
+
 	for _, dir := range []string{stateDir, logDir} {
 		info, statErr := os.Stat(dir)
 		require.NoError(t, statErr)
@@ -135,6 +143,8 @@ func TestObservability_E2E(t *testing.T) {
 		"[DEBUG] mcp-proxy.transport: Daemon rejected WebSocket authorization status=401",
 		"[ERROR] mcp-proxy.health: Operation failed unexpectedly reason=authorization_rejected",
 		"[INFO] mcp-proxy.health: Operation finished outcome=failure",
+		"[WARNING] mcp-proxy.proxy: Rejected profile configuration",
+		"[INFO] mcp-proxy.proxy: Operation finished outcome=failure",
 	} {
 		assert.Contains(t, string(diagnostics), line)
 	}
@@ -169,6 +179,7 @@ func checkUsage(t *testing.T, stateDir string) {
 	require.NoError(t, rows.Err())
 	assert.ElementsMatch(t, []string{
 		`mcp-proxy.proxy.run {"outcome":"success"}`,
+		`mcp-proxy.proxy.run {"outcome":"failure"}`,
 		`mcp-proxy.hook.run {"outcome":"success"}`,
 		`mcp-proxy.health.run {"outcome":"success"}`,
 		`mcp-proxy.health.run {"outcome":"failure"}`,

@@ -163,26 +163,24 @@ func dispatch(ctx context.Context, f *flags, configSet, hookSet bool, args []str
 	logger, closeDiagnostics := openDiagnostics(role, stderr)
 	defer closeDiagnostics()
 
-	var prof config.Profile
-	if f.profile != "" {
-		p, err := config.Load(f.profile)
-		if err != nil {
-			logger.Warn("Rejected profile configuration")
-			return err
-		}
-		prof = p
-	}
-
-	daemonURL := resolveURL(args, prof)
-	extraHeaders := prof.Headers
-	caCert := prof.CACert
-
 	settings, err := config.LoadTelemetry()
 	if err != nil {
 		logger.Warn("Could not load telemetry settings; disabling capture", "file", "telemetry.conf")
 		settings.Disabled = true
 	}
 	return observeOperation(logger, role, settings, func() error {
+		var prof config.Profile
+		if f.profile != "" {
+			p, err := config.Load(f.profile)
+			if err != nil {
+				logger.Warn("Rejected profile configuration")
+				return err
+			}
+			prof = p
+		}
+		daemonURL := resolveURL(args, prof)
+		extraHeaders := prof.Headers
+		caCert := prof.CACert
 		switch role {
 		case "health":
 			return runHealthCheck(ctx, daemonURL, extraHeaders, caCert, stderr, logger)
