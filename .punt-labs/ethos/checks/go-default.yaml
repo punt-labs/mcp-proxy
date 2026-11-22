@@ -21,7 +21,8 @@ checks:
   - name: vet-commit
     stage: commit
     files: ["**/*.go"]
-    exclude: [".tmp/**", ".punt-labs/local/**"]
+    # e2e and integration packages build only under their tags; make check skips them too.
+    exclude: [".tmp/**", ".punt-labs/local/**", "internal/e2e/**", "internal/integration/**"]
     adapter: go
     go: vet
     cwd: root
