@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -53,8 +54,11 @@ func LoadTelemetry() (Telemetry, error) {
 	if len(meta.Undecoded()) != 0 {
 		return Telemetry{}, errors.New("unknown telemetry settings")
 	}
-	if meta.IsDefined("retention_days") && (settings.RetentionDays < 1 || settings.RetentionDays > 3650) {
-		return Telemetry{}, errors.New("telemetry retention must be between 1 and 3650 days")
+	for _, key := range meta.Keys() {
+		if len(key) == 1 && strings.EqualFold(key[0], "retention_days") &&
+			(settings.RetentionDays < 1 || settings.RetentionDays > 3650) {
+			return Telemetry{}, errors.New("telemetry retention must be between 1 and 3650 days")
+		}
 	}
 	return settings, nil
 }
