@@ -311,6 +311,7 @@ func TestDiagnosticsLockTimeout_E2E(t *testing.T) {
 			}
 			elapsed := time.Since(start)
 			assert.GreaterOrEqual(t, elapsed, 2*time.Second)
+			assert.Less(t, elapsed, 3500*time.Millisecond, "expected a single rotation lock timeout")
 			assert.Equal(t, tc.wantStderr, stderr.String())
 			t.Logf("completed with lock held after %v; stderr=%q", elapsed.Round(time.Millisecond), stderr.String())
 		})
