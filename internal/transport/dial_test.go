@@ -2,6 +2,10 @@ package transport_test
 
 import (
 	"context"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +15,24 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestDial_AuthorizationRejected(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(status)
+			}))
+			defer server.Close()
+
+			var logs strings.Builder
+			logger := slog.New(slog.NewTextHandler(&logs, nil))
+			_, err := transport.Dial(t.Context(), "ws"+strings.TrimPrefix(server.URL, "http"), 0, nil, "", logger)
+			require.Error(t, err)
+			assert.Equal(t, "authorization_rejected", transport.FailureReason(err))
+			assert.Empty(t, logs.String())
+		})
+	}
+}
 
 func TestDial_Success(t *testing.T) {
 	d := testutil.NewMockDaemon()

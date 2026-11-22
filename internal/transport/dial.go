@@ -73,12 +73,17 @@ func (e *InvalidURLError) Unwrap() error {
 	return e.Err
 }
 
+type authorizationError struct{ error }
+
+func (e *authorizationError) Unwrap() error { return e.error }
+
 // FailureReason classifies errors without logging addresses, URLs or peer text.
 func FailureReason(err error) string {
 	var refused *ConnectionRefusedError
 	var timeout *TimeoutError
 	var invalid *InvalidURLError
 	var ca *CACertError
+	var auth *authorizationError
 	switch {
 	case errors.As(err, &refused):
 		return "connection_refused"
@@ -88,6 +93,8 @@ func FailureReason(err error) string {
 		return "invalid_url"
 	case errors.As(err, &ca):
 		return "ca_certificate"
+	case errors.As(err, &auth):
+		return "authorization_rejected"
 	case websocket.CloseStatus(err) != -1:
 		return "websocket_closed"
 	case errors.Is(err, io.EOF):
@@ -198,9 +205,6 @@ func dial(ctx context.Context, rawURL string, sessionKey int, subprotocols []str
 
 	conn, resp, err := websocket.Dial(dialCtx, u.String(), opts)
 	if err != nil {
-		if resp != nil && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
-			logger.Warn("Daemon rejected WebSocket authorization", "status", resp.StatusCode)
-		}
 		// coder/websocket returns a non-nil *http.Response when the HTTP upgrade
 		// fails with a real HTTP reply. Drain and close the Body so net/http can
 		// return the underlying TCP connection to its idle pool for reuse
@@ -210,6 +214,10 @@ func dial(ctx context.Context, rawURL string, sessionKey int, subprotocols []str
 			_ = resp.Body.Close()
 		}
 		addr := u.Host
+		if resp != nil && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
+			logger.Debug("Daemon rejected WebSocket authorization", "status", resp.StatusCode)
+			return nil, &authorizationError{fmt.Errorf("dialing %s: %w", addr, err)}
+		}
 
 		var netErr *net.OpError
 		if errors.As(err, &netErr) {

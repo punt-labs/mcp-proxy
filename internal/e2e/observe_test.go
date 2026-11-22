@@ -132,8 +132,8 @@ func TestObservability_E2E(t *testing.T) {
 		"[WARNING] mcp-proxy.reconnect: Daemon connection interrupted",
 		"[INFO] mcp-proxy.reconnect: Handshake replay finished outcome=success",
 		"[INFO] mcp-proxy.hook: Operation finished outcome=success",
-		"[WARNING] mcp-proxy.transport: Daemon rejected WebSocket authorization status=401",
-		"[ERROR] mcp-proxy.health: Operation failed unexpectedly",
+		"[DEBUG] mcp-proxy.transport: Daemon rejected WebSocket authorization status=401",
+		"[ERROR] mcp-proxy.health: Operation failed unexpectedly reason=authorization_rejected",
 		"[INFO] mcp-proxy.health: Operation finished outcome=failure",
 	} {
 		assert.Contains(t, string(diagnostics), line)
