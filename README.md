@@ -174,6 +174,8 @@ Proxy, hook, and health diagnostics are written at INFO and above to
 rotating backups are private (`0600`) and limited to 5 MiB each. Look
 there for connection, retry, and shutdown diagnostics. Logs do not go to
 MCP stdout or contain URLs, tokens, or message contents.
+If the rotation lock is held for two seconds during startup, the command
+warns once on stderr and continues without file diagnostics.
 
 By default, each completed proxy, hook, or health operation records its
 kind, duration, and outcome in `~/.punt-labs/mcp-proxy/telemetry.db`.

@@ -3,6 +3,7 @@
 package e2e_test
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -241,4 +243,77 @@ func TestDiagnosticsUnavailable_E2E(t *testing.T) {
 	assert.Empty(t, out)
 	assert.Contains(t, stderr.String(), "warning: could not initialize private diagnostics")
 	assert.Contains(t, stderr.String(), "mcp-proxy: ok")
+}
+
+func TestDiagnosticsLockTimeout_E2E(t *testing.T) {
+	home := t.TempDir()
+	bin := installForSmoke(t, home)
+	logDir := filepath.Join(home, ".punt-labs", "mcp-proxy", "logs")
+	require.NoError(t, os.MkdirAll(logDir, 0o700))
+	logPath := filepath.Join(logDir, "mcp-proxy.log")
+	lock, err := os.OpenFile(logPath+".rotate.lock", os.O_CREATE|os.O_RDWR, 0o600)
+	require.NoError(t, err)
+	defer func() { _ = lock.Close() }()
+	require.NoError(t, syscall.Flock(int(lock.Fd()), syscall.LOCK_EX))
+
+	d := testutil.NewMockDaemon()
+	defer d.Close()
+	d.Handler = func(msg []byte) []byte {
+		if strings.Contains(string(msg), "hook/") {
+			return []byte(`{"jsonrpc":"2.0","id":1,"result":{"decision":"allow"}}`)
+		}
+		return msg
+	}
+	const warning = "mcp-proxy: warning: could not initialize private diagnostics\n"
+	const ping = `{"jsonrpc":"2.0","method":"ping","id":1}`
+
+	for _, tc := range []struct {
+		name       string
+		args       []string
+		wantStderr string
+	}{
+		{name: "proxy", args: []string{d.URL()}, wantStderr: warning},
+		{name: "hook", args: []string{d.BaseURL(), "--hook", "PreToolUse"}, wantStderr: warning},
+		{name: "health", args: []string{"--health", d.URL()}, wantStderr: warning + "mcp-proxy: ok\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, bin, tc.args...)
+			cmd.Env = runtimeEnv(home)
+			var stdout, stderr testutil.SafeBuffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+			start := time.Now()
+			switch tc.name {
+			case "proxy":
+				stdin, err := cmd.StdinPipe()
+				require.NoError(t, err)
+				require.NoError(t, cmd.Start())
+				defer func() {
+					_ = stdin.Close()
+					_ = cmd.Process.Kill()
+					_ = cmd.Wait()
+				}()
+				_, err = fmt.Fprintln(stdin, ping)
+				require.NoError(t, err)
+				require.True(t, waitForLines(&stdout, 1, 5*time.Second), "proxy did not forward ping while the lock was held")
+				require.NoError(t, stdin.Close())
+				require.NoError(t, cmd.Wait())
+				assert.Equal(t, ping+"\n", stdout.String())
+			case "hook":
+				cmd.Stdin = strings.NewReader("{}")
+				require.NoError(t, cmd.Run())
+				assert.JSONEq(t, `{"decision":"allow"}`, stdout.String())
+			case "health":
+				require.NoError(t, cmd.Run())
+				assert.Empty(t, stdout.String())
+			}
+			elapsed := time.Since(start)
+			assert.GreaterOrEqual(t, elapsed, 2*time.Second)
+			assert.Equal(t, tc.wantStderr, stderr.String())
+			t.Logf("completed with lock held after %v; stderr=%q", elapsed.Round(time.Millisecond), stderr.String())
+		})
+	}
+	assert.NoFileExists(t, logPath)
 }

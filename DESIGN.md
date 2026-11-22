@@ -880,8 +880,9 @@ Each runtime invocation records one versioned span with its latency and
 outcome, without identifiers or wire data. The shared package owns local
 SQLite and retention, and can be disabled independently from diagnostics.
 User-owned telemetry settings live apart from daemon connection profiles,
-which other tools may regenerate. If the diagnostic sink cannot be opened
-privately, warn on stderr and continue without a durable diagnostic sink.
+which other tools may regenerate. The shared sink waits at most two seconds
+for the rotation lock during startup. If the diagnostic sink cannot be opened
+privately, warn once on stderr and continue without a diagnostic sink.
 Its pure-Go driver preserves the static build required by DES-014.
 
 ---

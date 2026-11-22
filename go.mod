@@ -7,7 +7,7 @@ toolchain go1.26.11
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/coder/websocket v1.8.14
-	github.com/punt-labs/punt-observe-go v0.0.0-20261122183941-8b005646fab7
+	github.com/punt-labs/punt-observe-go v0.0.0-20261122192811-90067f488a2a
 	github.com/spf13/cobra v1.10.1
 	github.com/stretchr/testify v1.11.1
 	modernc.org/sqlite v1.46.1
