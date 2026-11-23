@@ -34,6 +34,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- Clear 3 open Dependabot alerts (1 high): `google.golang.org/grpc`
+  1.83.1 → 1.83.2 (GHSA-2v4p-qf9q-27wj) and the `go.opentelemetry.io/otel`
+  modules 1.45.0 → 1.47.0 (GHSA-q7gw-24fr-5p69). testify
+  1.11.1 → 1.12.1 comes along as a requirement of otel 1.47.0.
+
 - Go toolchain bumped from go1.26.10 to go1.26.11, fixing standard-library
   advisory GO-2026-6859 (net/http `MaxBytesReader` header race) that
   `govulncheck` flags in the shipped binary.
