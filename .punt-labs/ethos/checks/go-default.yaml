@@ -1,0 +1,47 @@
+name: go-default
+description: Advisory formatting on edit, blocking vet on commit, full gate at handoff.
+checks:
+  - name: gofmt-edit
+    stage: edit
+    files: ["**/*.go"]
+    exclude: [".tmp/**", ".punt-labs/local/**"]
+    run: [gofmt, -l, "{file}"]
+    fail_on_output: true
+    on_fail: advisory
+    timeout: 5s
+  - name: gofmt-commit
+    stage: commit
+    files: ["**/*.go"]
+    exclude: [".tmp/**", ".punt-labs/local/**"]
+    run: [gofmt, -l, "{files}"]
+    fail_on_output: true
+    on_fail: block
+    timeout: 120s
+    cwd: root
+  - name: vet-commit
+    stage: commit
+    files: ["**/*.go"]
+    # e2e and integration packages build only under their tags; make check skips them too.
+    exclude: [".tmp/**", ".punt-labs/local/**", "internal/e2e/**", "internal/integration/**"]
+    adapter: go
+    go: vet
+    cwd: root
+    on_fail: block
+    timeout: 120s
+  - name: vet-module-commit
+    stage: commit
+    files: [go.mod, go.sum, go.work, go.work.sum]
+    exclude: [".tmp/**", ".punt-labs/local/**"]
+    run: [go, vet, ./...]
+    cwd: root
+    on_fail: block
+    timeout: 120s
+  - name: full-gate
+    stage: handoff
+    files: all
+    exclude: [".tmp/**", ".punt-labs/local/**"]
+    adapter: make
+    target: check
+    cwd: root
+    on_fail: block
+    timeout: 20m

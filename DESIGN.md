@@ -896,6 +896,32 @@ Its pure-Go driver preserves the static build required by DES-014.
 
 ---
 
+## DES-019: Advisory Edit Checks and Staged Quality Gates
+
+**Date:** 2026-11-22
+**Status:** SETTLED
+**Issue:** PL-1344
+
+Adopt Ethos DES-085 with the repository-owned `go-default` check set selected
+by `.punt-labs/ethos.yaml`. Edits run read-only `gofmt -l` with a five-second
+budget and advisory feedback, not the full `make check`. Commit checks block
+on formatting and package-scoped vet; module/workspace manifest changes vet
+the whole module. All checks exclude `.tmp/**` and `.punt-labs/local/**`.
+
+Handoff runs the existing `make check` with a twenty-minute budget even with
+no attributed files. This retains lint, stricter formatting, vulnerability,
+documentation and race-test coverage; e2e remains a separate explicit target.
+Vet, lint and test failures no longer interrupt intermediate edits or TDD.
+Keeping the full gate on every edit was rejected because it repeats
+repository-wide work for file-local feedback.
+
+Regenerate marked `.claude/agents` files through the new Ethos SessionStart
+generator rather than embedding policy in generated shell. The legacy
+`.punt-labs/ethos/agents` prompts are not generated hook-bearing files and
+remain unchanged. Runtime policy requires ethos 5.2.0 or later on PATH;
+blocking commits additionally require the pre-commit shim, and handoffs require
+the updated SubagentStop integration. Mission-result checks are not yet wired.
+
 ## Prior Art
 
 ### SageOx (sageox/ox) — closest match
