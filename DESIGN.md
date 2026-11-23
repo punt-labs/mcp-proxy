@@ -918,7 +918,7 @@ repository-wide work for file-local feedback.
 Regenerate marked `.claude/agents` files through the new Ethos SessionStart
 generator rather than embedding policy in generated shell. The legacy
 `.punt-labs/ethos/agents` prompts are not generated hook-bearing files and
-remain unchanged. Runtime policy requires a DES-085-capable binary on PATH;
+remain unchanged. Runtime policy requires ethos 5.2.0 or later on PATH;
 blocking commits additionally require the pre-commit shim, and handoffs require
 the updated SubagentStop integration. Mission-result checks are not yet wired.
 

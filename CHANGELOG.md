@@ -26,7 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Generated Ethos agent edit hooks now use advisory, read-only Go formatting
   checks instead of running `make check` after every edit. The project check
   set blocks formatting/vet failures at commit and runs the full gate at
-  handoff with a twenty-minute budget (DES-019; requires updated Ethos hooks).
+  handoff with a twenty-minute budget (DES-019; requires ethos 5.2.0).
 - Linear is the tracker of record (Punt Labs team, label `repo:mcp`).
   The beads tracker is removed: `.beads/`, the `BEADS_*` block in
   `.envrc`, the `bd` gitattributes merge driver, the `bd` permission
