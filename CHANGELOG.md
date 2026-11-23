@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+
+- The unused WebSocket error accessors and their write-only state in the mock daemon.
+
 ### Added
 
 - biff is enabled for this repo (`.punt-labs/biff/enabled`). A new
