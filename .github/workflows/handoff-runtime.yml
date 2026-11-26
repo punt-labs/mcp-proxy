@@ -1,0 +1,139 @@
+name: Handoff runtime
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/handoff-runtime.yml
+      - .punt-labs/ethos/checks/snapshots/go-default.yaml
+      - scripts/build-handoff-runtime.sh
+      - Makefile
+      - go.mod
+      - go.sum
+  push:
+    tags: [handoff-runtime]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.22.3'
+          package-manager-cache: false
+      - name: Build the runtime
+        run: |
+          mkdir -p "$RUNNER_TEMP/runtime-assets"
+          bash scripts/build-handoff-runtime.sh "$RUNNER_TEMP/runtime-assets/mcp-proxy-handoff-linux-amd64.tar.gz"
+          cd "$RUNNER_TEMP/runtime-assets"
+          sha256sum mcp-proxy-handoff-linux-amd64.tar.gz > mcp-proxy-handoff-linux-amd64.tar.gz.sha256
+      - name: Run the full gate with the relocated runtime and only loopback
+        run: |
+          # Like Ethos, system.tools keys host dependencies without restricting PATH.
+          # This preflight checks that declared tools resolve and bundled tools come from the runtime.
+          sidecar=.punt-labs/ethos/checks/snapshots/go-default.yaml
+          system_path=/usr/local/bin:/usr/bin:/bin
+          tools=$(yq -r '.checks["full-gate"].system.tools[]' "$sidecar")
+          while IFS= read -r tool; do
+            if [[ -n "$tool" ]] && ! PATH="$system_path" command -v "$tool"; then
+              printf 'Missing host tool declared in system.tools: %s\n' "$tool" >&2
+              exit 1
+            fi
+          done <<< "$tools"
+
+          scratch=$(mktemp -d)
+          trap 'rm -rf -- "$scratch"' EXIT
+          runtime="$scratch/runtime"
+          mkdir "$runtime" "$scratch/home" "$scratch/tmp"
+          tar -xzf "$RUNNER_TEMP/runtime-assets/mcp-proxy-handoff-linux-amd64.tar.gz" -C "$runtime"
+          dirs=$(yq -r '.checks["full-gate"] | ((.path // []) + (.runtime.platforms["linux-amd64"].path // []))[]' "$sidecar")
+          gate_path=
+          while IFS= read -r dir; do
+            [[ -n "$dir" ]] || continue
+            dir=${dir//\{root\}/"$PWD"}
+            dir=${dir//\{runtime\}/"$runtime"}
+            dir=${dir//\{scratch\}/"$scratch"}
+            gate_path+="$dir:"
+          done <<< "$dirs"
+          gate_path+="$system_path"
+
+          mkdir -p "$scratch/go-mod/cache"
+          cp -R "$runtime/cache/go-proxy" "$scratch/go-mod/cache/download"
+          cp -R "$runtime/cache/npm" "$scratch/npm-cache"
+          mkdir -p "$scratch/data/govulndb"
+          curl --proto '=https' --fail --silent --show-error --retry 2 --max-time 120 \
+            https://vuln.go.dev/vulndb.zip -o "$scratch/govulndb.zip"
+          unzip -q "$scratch/govulndb.zip" -d "$scratch/data/govulndb"
+          sudo unshare --net bash -ec '
+            ip link set lo up
+            exec setpriv --reuid="$1" --regid="$2" --clear-groups -- "${@:3}"
+          ' bash "$(id -u)" "$(id -g)" env -i \
+            PATH="$gate_path" \
+            HOME="$scratch/home" TMPDIR="$scratch/tmp" \
+            GOTOOLCHAIN=local CGO_ENABLED=1 GOFLAGS=-modcacherw GOPATH="$scratch/gopath" \
+            GOMODCACHE="$scratch/go-mod" GOCACHE="$scratch/go-build" \
+            GOPROXY="file://$runtime/cache/go-proxy" \
+            npm_config_cache="$scratch/npm-cache" npm_config_offline=true \
+            VULNCHECK_DB="file://$scratch/data/govulndb" /bin/bash -ec '
+              for tool in go node npm npx; do
+                if ! executable=$(command -v "$tool") || [[ "$executable" != "$1/"* ]] ||
+                  ! resolved=$(realpath -e -- "$executable") || [[ "$resolved" != "$1/"* ]]; then
+                  printf "Expected %s to resolve inside %s (found %s)\n" "$tool" "$1" "$executable" >&2
+                  exit 1
+                fi
+              done
+              exec make check
+            ' bash "$runtime"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mcp-proxy-handoff-linux-amd64
+          path: ${{ runner.temp }}/runtime-assets/
+          compression-level: 0
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    needs: build
+    concurrency: handoff-runtime-publish
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: mcp-proxy-handoff-linux-amd64
+          path: runtime-assets
+      - name: Publish the verified runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd runtime-assets
+          asset=mcp-proxy-handoff-linux-amd64.tar.gz
+          sha256sum --check "$asset.sha256"
+          sha=$(cut -d' ' -f1 "$asset.sha256")
+          pinned="mcp-proxy-handoff-linux-amd64-$sha.tar.gz"
+          mv -- "$asset" "$pinned"
+          printf '%s  %s\n' "$sha" "$pinned" > "$pinned.sha256"
+          if ! gh release view handoff-runtime --repo "$GITHUB_REPOSITORY" >/dev/null; then
+            gh release create handoff-runtime --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" --prerelease --latest=false --title "mcp-proxy handoff runtimes" --notes ""
+          fi
+          existing=$(gh release view handoff-runtime --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          for file in "$pinned" "$pinned.sha256"; do
+            if ! grep -Fxq -- "$file" <<< "$existing"; then
+              gh release upload handoff-runtime "$file" --repo "$GITHUB_REPOSITORY"
+            fi
+          done

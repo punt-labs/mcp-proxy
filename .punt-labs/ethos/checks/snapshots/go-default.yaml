@@ -1,0 +1,37 @@
+checks:
+  full-gate:
+    profile: linux-worktree-v1
+    epoch: mcp-proxy-v1
+    sources:
+      mode: worktree
+    network: loopback
+    system:
+      tools: [as, gcc, ld, make, ps, sh]
+    runtime:
+      platforms:
+        linux-amd64:
+          bundle: mcp-proxy-handoff-linux-amd64-4a04d96634092b27310b9df58f1892877b8e416ed2318d3d971221713d726eed.tar.gz
+          sha256: "4a04d96634092b27310b9df58f1892877b8e416ed2318d3d971221713d726eed"
+          url: https://github.com/punt-labs/mcp-proxy/releases/download/handoff-runtime/mcp-proxy-handoff-linux-amd64-4a04d96634092b27310b9df58f1892877b8e416ed2318d3d971221713d726eed.tar.gz
+          path: ["{runtime}/go/bin", "{runtime}/node/bin"]
+          env:
+            CGO_ENABLED: "1"
+            GOFLAGS: -modcacherw
+            GOTOOLCHAIN: local
+            GOPATH: "{scratch}/gopath"
+            GOCACHE: "{scratch}/go-build"
+            GOMODCACHE: "{scratch}/go-mod"
+            GOPROXY: "file://{runtime}/cache/go-proxy"
+            GOLANGCI_LINT_CACHE: "{scratch}/golangci-lint"
+            npm_config_cache: "{scratch}/npm-cache"
+            npm_config_offline: "true"
+            VULNCHECK_DB: "file://{runtime}/data/govulndb"
+    scratch:
+      seed:
+        "{scratch}/go-mod/cache/download": "{runtime}/cache/go-proxy"
+        "{scratch}/npm-cache": "{runtime}/cache/npm"
+    data:
+      - name: govulndb
+        url: https://vuln.go.dev
+        max_age_hours: 24
+        mount: govulndb

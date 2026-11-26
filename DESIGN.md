@@ -922,6 +922,22 @@ remain unchanged. Runtime policy requires ethos 5.2.0 or later on PATH;
 blocking commits additionally require the pre-commit shim, and handoffs require
 the updated SubagentStop integration. Mission-result checks are not yet wired.
 
+## DES-020: Verified Handoff Snapshot
+
+The `go-default` sidecar runs the existing `full-gate` in Ethos's verified
+worktree snapshot. The Linux amd64 runtime pins Go, Node, npm, npx and
+dependency inputs by archive digest. Those executables come from the
+runtime PATH; `system.tools` declares only host tools such as GCC and make.
+In Ethos, `system.tools` keys host dependencies without restricting PATH; the preflight checks that declared tools resolve and bundled tools come from the runtime.
+Builds, temporary files and npm cache writes stay private. Only loopback
+is available for the tests.
+
+Ethos refreshes the Go vulnerability database separately from the runtime
+archive and mounts it read-only at `{runtime}/data/govulndb` for govulncheck.
+Ethos must defer when the database is missing or more than 24 hours old.
+Live and CI checks still use the public database.
+Do not use ambient host caches or skip gate targets to accommodate isolation.
+
 ## Prior Art
 
 ### SageOx (sageox/ox) — closest match
