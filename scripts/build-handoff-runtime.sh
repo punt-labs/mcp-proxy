@@ -16,10 +16,24 @@ mkdir -p "$runtime/cache/npm" "$work/home"
 cp -a -- "$(go env GOROOT)" "$runtime/go"
 find "$runtime/go" -type d -exec chmod u+w {} +
 node_root=$(cd -- "$(dirname -- "$(command -v node)")/.." && pwd -P)
+npm_cli=$(realpath -- "$(command -v npm)")
+npm_root=$(dirname -- "$(dirname -- "$npm_cli")")
 mkdir -p "$runtime/node/bin" "$runtime/node/lib/node_modules"
-cp -a -- "$node_root/bin/node" "$node_root/bin/npm" "$node_root/bin/npx" "$runtime/node/bin/"
-cp -a -- "$node_root/lib/node_modules/npm" "$runtime/node/lib/node_modules/"
-cp -- "$node_root/LICENSE" "$runtime/node/"
+cp -aL -- "$node_root/bin/node" "$runtime/node/bin/"
+if [[ $npm_root == "$node_root/lib/node_modules/npm" ]]; then
+    cp -a -- "$npm_root" "$runtime/node/lib/node_modules/npm"
+else
+    npm_archive=$(npm pack "npm@$(npm --version)" --silent --cache "$work/npm-pack-cache" --pack-destination "$work")
+    mkdir "$runtime/node/lib/node_modules/npm"
+    tar -xzf "$work/$npm_archive" -C "$runtime/node/lib/node_modules/npm" --strip-components=1
+fi
+ln -s ../lib/node_modules/npm/bin/npm-cli.js "$runtime/node/bin/npm"
+ln -s ../lib/node_modules/npm/bin/npx-cli.js "$runtime/node/bin/npx"
+node_license="$node_root/LICENSE"
+if [[ ! -f $node_license ]]; then
+    node_license="$node_root/share/doc/nodejs/copyright"
+fi
+cp -- "$node_license" "$runtime/node/LICENSE"
 
 env -i PATH="$runtime/go/bin:$runtime/node/bin:/usr/bin:/bin" \
     HOME="$work/home" GOTOOLCHAIN=local CGO_ENABLED=1 GOFLAGS=-modcacherw GOPATH="$work/gopath" \
