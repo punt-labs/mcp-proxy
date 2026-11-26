@@ -10,8 +10,8 @@ checks:
     runtime:
       platforms:
         linux-amd64:
-          bundle: mcp-proxy-handoff-linux-amd64-1fad578f98cd92bf8af6b8a51825e7cde106ce5410c80aa8504e113ae024bdb4.tar.gz
-          sha256: "1fad578f98cd92bf8af6b8a51825e7cde106ce5410c80aa8504e113ae024bdb4"
+          bundle: mcp-proxy-handoff-linux-amd64-d984a3970e5417c3ae02066bf65f1c6fcb2f06798c81044adf7b035585ccaa9f.tar.gz
+          sha256: "d984a3970e5417c3ae02066bf65f1c6fcb2f06798c81044adf7b035585ccaa9f"
           path: ["{runtime}/go/bin", "{runtime}/node/bin"]
           env:
             CGO_ENABLED: "1"
@@ -24,11 +24,13 @@ checks:
             GOLANGCI_LINT_CACHE: "{scratch}/golangci-lint"
             npm_config_cache: "{scratch}/npm-cache"
             npm_config_offline: "true"
-            VULNCHECK_DB: "file://{runtime}/vulndb"
+            VULNCHECK_DB: "file://{runtime}/data/govulndb"
     scratch:
       seed:
         "{scratch}/go-mod/cache/download": "{runtime}/cache/go-proxy"
         "{scratch}/npm-cache": "{runtime}/cache/npm"
     data:
-      - path: "{runtime}/vulndb/index/db.json"
-        max_age_hours: 72
+      - name: govulndb
+        url: https://vuln.go.dev
+        max_age_hours: 24
+        mount: govulndb

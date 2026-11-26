@@ -53,10 +53,13 @@ from the [handoff-runtime release](https://github.com/punt-labs/mcp-proxy/releas
 3. Save the verified archive as `~/.punt-labs/ethos/runtimes/<sha256>.tar.gz`.
    Do not unpack it; Ethos verifies and prepares it.
 
-Use an Ethos build that supports DES-086 worktree snapshots. The bundled Go
-vulnerability database expires after 72 hours. A stale or
-missing runtime defers the sandbox check; run `make check` live in that
-case. Live and CI checks use `https://vuln.go.dev` by default.
+Use an Ethos build that supports DES-086 worktree snapshots and managed data.
+Run `ethos handoff refresh-data` from the repository to fetch the Go
+vulnerability database outside the sandbox. Ethos mounts it read-only and
+defers the sandbox check if the data is missing or more than 24 hours old.
+The runtime archive does not include the database. If the snapshot is
+unavailable, run `make check` live. Live and CI checks use
+`https://vuln.go.dev` by default.
 
 To refresh the runtime, dispatch **Handoff runtime** from `main` and update
 the sidecar from the new asset's checksum. For the first publication before

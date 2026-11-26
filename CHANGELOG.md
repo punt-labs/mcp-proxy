@@ -13,8 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - An Ethos snapshot profile for the full Linux amd64 handoff gate, with a
-  pinned offline runtime and vulnerability database. Live checks continue
-  to use the public vulnerability database.
+  pinned offline runtime and a Go vulnerability database refreshed separately
+  by Ethos. Live checks continue to use the public vulnerability database.
 - biff is enabled for this repo (`.punt-labs/biff/enabled`). A new
   `Biff CI Notifications` workflow (`.github/workflows/biff-notify.yml`) posts
   a biff relay notification when a push-triggered Docs, Lint, Release, or Test

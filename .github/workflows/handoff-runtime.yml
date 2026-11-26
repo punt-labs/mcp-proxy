@@ -49,6 +49,10 @@ jobs:
           mkdir -p "$scratch/go-mod/cache"
           cp -R "$runtime/cache/go-proxy" "$scratch/go-mod/cache/download"
           cp -R "$runtime/cache/npm" "$scratch/npm-cache"
+          mkdir -p "$scratch/data/govulndb"
+          curl --proto '=https' --fail --silent --show-error --retry 2 --max-time 120 \
+            https://vuln.go.dev/vulndb.zip -o "$scratch/govulndb.zip"
+          unzip -q "$scratch/govulndb.zip" -d "$scratch/data/govulndb"
           sudo unshare --net bash -ec '
             ip link set lo up
             exec setpriv --reuid="$1" --regid="$2" --clear-groups -- "${@:3}"
@@ -59,7 +63,7 @@ jobs:
             GOMODCACHE="$scratch/go-mod" GOCACHE="$scratch/go-build" \
             GOPROXY="file://$runtime/cache/go-proxy" \
             npm_config_cache="$scratch/npm-cache" npm_config_offline=true \
-            VULNCHECK_DB="file://$runtime/vulndb" make check
+            VULNCHECK_DB="file://$scratch/data/govulndb" make check
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mcp-proxy-handoff-linux-amd64
