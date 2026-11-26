@@ -928,6 +928,7 @@ The `go-default` sidecar runs the existing `full-gate` in Ethos's verified
 worktree snapshot. The Linux amd64 runtime pins Go, Node, npm, npx and
 dependency inputs by archive digest. Those executables come from the
 runtime PATH; `system.tools` declares only host tools such as GCC and make.
+In Ethos, `system.tools` keys host dependencies without restricting PATH; the preflight checks that declared tools resolve and bundled tools come from the runtime.
 Builds, temporary files and npm cache writes stay private. Only loopback
 is available for the tests.
 

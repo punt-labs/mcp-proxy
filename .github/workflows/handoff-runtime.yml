@@ -41,6 +41,8 @@ jobs:
           sha256sum mcp-proxy-handoff-linux-amd64.tar.gz > mcp-proxy-handoff-linux-amd64.tar.gz.sha256
       - name: Run the full gate with the relocated runtime and only loopback
         run: |
+          # Like Ethos, system.tools keys host dependencies without restricting PATH.
+          # This preflight checks that declared tools resolve and bundled tools come from the runtime.
           sidecar=.punt-labs/ethos/checks/snapshots/go-default.yaml
           system_path=/usr/local/bin:/usr/bin:/bin
           tools=$(yq -r '.checks["full-gate"].system.tools[]' "$sidecar")
