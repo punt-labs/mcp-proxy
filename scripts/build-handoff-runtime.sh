@@ -8,7 +8,8 @@ fi
 output=$(realpath -m -- "$1")
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
-work=$(mktemp -d)
+mkdir -p .tmp
+work=$(mktemp -d "$PWD/.tmp/handoff-runtime.XXXXXX")
 trap 'chmod -R u+w -- "$work"; rm -rf -- "$work"' EXIT
 runtime=$work/runtime
 mkdir -p "$runtime/cache/npm" "$work/home"
