@@ -53,6 +53,10 @@ from the [handoff-runtime release](https://github.com/punt-labs/mcp-proxy/releas
 3. Save the verified archive as `~/.punt-labs/ethos/runtimes/<sha256>.tar.gz`.
    Do not unpack it; Ethos verifies and prepares it.
 
+Until the first release asset is published, the sidecar pin is for local
+proof only and the download is unavailable. Replace that pin with the
+published asset's SHA-256 before merging this profile.
+
 Use an Ethos build that supports DES-086 worktree snapshots and managed data.
 Run `ethos handoff refresh-data` from the repository to fetch the Go
 vulnerability database outside the sandbox. Ethos mounts it read-only and
