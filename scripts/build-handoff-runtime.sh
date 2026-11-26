@@ -8,6 +8,23 @@ fi
 output=$(realpath -m -- "$1")
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
+node_bin=$(command -v node)
+if ! node_deps=$(env -u LD_LIBRARY_PATH -u LD_PRELOAD -u LD_AUDIT LC_ALL=C ldd "$node_bin"); then
+    printf 'Cannot verify shared libraries for %s. Use upstream Linux x64 Node.js.\n' "$node_bin" >&2
+    exit 1
+fi
+extra_deps=$(awk '
+    $1 == "linux-vdso.so.1" { next }
+    $1 ~ /^\/(usr\/)?lib(64)?\/.*ld-linux-x86-64\.so\.2$/ { next }
+    $1 ~ /^(libc\.so\.6|libm\.so\.6|libdl\.so\.2|libpthread\.so\.0|librt\.so\.1|libgcc_s\.so\.1|libstdc\+\+\.so\.6)$/ &&
+        $2 == "=>" && $3 ~ /^\/(usr\/)?lib(64)?\// { next }
+    { print }
+' <<< "$node_deps")
+if [[ -n $extra_deps ]]; then
+    printf 'Node.js at %s requires shared libraries outside the base system:\n%s\nUse upstream Linux x64 Node.js.\n' "$node_bin" "$extra_deps" >&2
+    exit 1
+fi
+
 mkdir -p .tmp
 work=$(mktemp -d "$PWD/.tmp/handoff-runtime.XXXXXX")
 trap 'chmod -R u+w -- "$work"; rm -rf -- "$work"' EXIT
@@ -16,11 +33,11 @@ mkdir -p "$runtime/cache/npm" "$work/home"
 
 cp -a -- "$(go env GOROOT)" "$runtime/go"
 find "$runtime/go" -type d -exec chmod u+w {} +
-node_root=$(cd -- "$(dirname -- "$(command -v node)")/.." && pwd -P)
+node_root=$(cd -- "$(dirname -- "$node_bin")/.." && pwd -P)
 npm_cli=$(realpath -- "$(command -v npm)")
 npm_root=$(dirname -- "$(dirname -- "$npm_cli")")
 mkdir -p "$runtime/node/bin" "$runtime/node/lib/node_modules"
-cp -aL -- "$node_root/bin/node" "$runtime/node/bin/"
+cp -aL -- "$node_bin" "$runtime/node/bin/node"
 if [[ $npm_root == "$node_root/lib/node_modules/npm" ]]; then
     cp -a -- "$npm_root" "$runtime/node/lib/node_modules/npm"
 else

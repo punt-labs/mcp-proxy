@@ -69,7 +69,8 @@ To refresh the runtime, dispatch **Handoff runtime** from `main` and update
 the sidecar from the new asset's checksum. For the first publication before
 the workflow is on `main`, a maintainer can push the `handoff-runtime` tag
 on a reviewed provisioning commit. Use the digest of the published bytes,
-not a local rebuild. Build a local archive for testing with
+not a local rebuild. For a local build, use upstream Linux x64 Node.js on
+`PATH` (as CI does), then run
 `bash scripts/build-handoff-runtime.sh /path/to/runtime.tar.gz`.
 
 ## End-to-end tests
