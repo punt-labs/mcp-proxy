@@ -6,7 +6,7 @@ checks:
       mode: worktree
     network: loopback
     system:
-      tools: [as, gcc, go, ld, make, node, npm, npx, ps, sh]
+      tools: [as, gcc, ld, make, ps, sh]
     runtime:
       platforms:
         linux-amd64:
