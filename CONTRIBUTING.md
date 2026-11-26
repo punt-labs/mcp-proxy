@@ -46,16 +46,12 @@ The Linux amd64 snapshot runs the same full gate with private writable
 caches and no network access beyond loopback. Install the runtime archive
 from the [handoff-runtime release](https://github.com/punt-labs/mcp-proxy/releases/tag/handoff-runtime):
 
-1. Find the Linux amd64 SHA-256 in
+1. Find the Linux amd64 download URL and SHA-256 in
    `.punt-labs/ethos/checks/snapshots/go-default.yaml`.
-2. Download `mcp-proxy-handoff-linux-amd64-<sha256>.tar.gz` and check
-   its SHA-256 against the checkout's pin.
+2. Download the archive from that URL and check its SHA-256 against the
+   checkout's pin.
 3. Save the verified archive as `~/.punt-labs/ethos/runtimes/<sha256>.tar.gz`.
    Do not unpack it; Ethos verifies and prepares it.
-
-Until the first release asset is published, the sidecar pin is for local
-proof only and the download is unavailable. Replace that pin with the
-published asset's SHA-256 before merging this profile.
 
 Use an Ethos build that supports DES-086 worktree snapshots and managed data.
 Run `ethos handoff refresh-data` from the repository to fetch the Go
@@ -65,12 +61,10 @@ The runtime archive does not include the database. If the snapshot is
 unavailable, run `make check` live. Live and CI checks use
 `https://vuln.go.dev` by default.
 
-To refresh the runtime, dispatch **Handoff runtime** from `main` and update
-the sidecar from the new asset's checksum. For the first publication before
-the workflow is on `main`, a maintainer can push the `handoff-runtime` tag
-on a reviewed provisioning commit. Use the digest of the published bytes,
-not a local rebuild. For a local build, use upstream Linux x64 Node.js on
-`PATH` (as CI does), then run
+Once the workflow is on `main`, dispatch **Handoff runtime** from `main`
+to refresh the bundle. Update the sidecar with the new release asset's name,
+URL, and SHA-256, not the digest of a local rebuild. For a local build, use
+upstream Linux x64 Node.js on `PATH` (as CI does), then run
 `bash scripts/build-handoff-runtime.sh /path/to/runtime.tar.gz`.
 
 ## End-to-end tests

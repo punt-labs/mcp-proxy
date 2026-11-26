@@ -10,8 +10,9 @@ checks:
     runtime:
       platforms:
         linux-amd64:
-          bundle: mcp-proxy-handoff-linux-amd64-cb066e3398e8b80e5eb8f7d6e5c796b888dd226f301fd745778e464d03420dba.tar.gz
-          sha256: "cb066e3398e8b80e5eb8f7d6e5c796b888dd226f301fd745778e464d03420dba"
+          bundle: mcp-proxy-handoff-linux-amd64-4a04d96634092b27310b9df58f1892877b8e416ed2318d3d971221713d726eed.tar.gz
+          sha256: "4a04d96634092b27310b9df58f1892877b8e416ed2318d3d971221713d726eed"
+          url: https://github.com/punt-labs/mcp-proxy/releases/download/handoff-runtime/mcp-proxy-handoff-linux-amd64-4a04d96634092b27310b9df58f1892877b8e416ed2318d3d971221713d726eed.tar.gz
           path: ["{runtime}/go/bin", "{runtime}/node/bin"]
           env:
             CGO_ENABLED: "1"
