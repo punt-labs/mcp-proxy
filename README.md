@@ -237,6 +237,10 @@ Claude Code ◄──────────────► mcp-proxy ◄──
 [Contributing](CONTRIBUTING.md) |
 [Changelog](CHANGELOG.md)
 
+The development gate, `make check`, scans against the public Go vulnerability
+database by default. Ethos can use a verified offline copy via `VULNCHECK_DB`;
+see the [handoff snapshot setup](CONTRIBUTING.md#ethos-handoff-snapshot).
+
 ## License
 
 MIT

@@ -1,6 +1,7 @@
 .PHONY: help lint lint-strict vulncheck docs test test-e2e check format build install clean dist cover
 
 VERSION ?= dev
+export VULNCHECK_DB ?= https://vuln.go.dev
 LDFLAGS      := -X main.version=$(VERSION)
 LDFLAGS_DIST := -s -w -X main.version=$(VERSION)
 
@@ -15,7 +16,7 @@ lint-strict: ## Lint (golangci-lint: errcheck, gosec, revive, gofumpt, ...)
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.1 run ./...
 
 vulncheck: ## Scan imports + call graph for known Go vulnerabilities
-	go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
+	go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 -db "$$VULNCHECK_DB" ./...
 
 docs: ## Lint markdown
 	npx --yes markdownlint-cli2 "**/*.md" "#node_modules"

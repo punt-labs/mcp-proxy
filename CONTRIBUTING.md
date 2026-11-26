@@ -40,6 +40,33 @@ make test
 
 `go test -race -count=1 ./...`.
 
+## Ethos handoff snapshot
+
+The Linux amd64 snapshot runs the same full gate with private writable
+caches and no network access beyond loopback. Install the runtime archive
+from the [handoff-runtime release](https://github.com/punt-labs/mcp-proxy/releases/tag/handoff-runtime):
+
+1. Find the Linux amd64 SHA-256 in
+   `.punt-labs/ethos/checks/snapshots/go-default.yaml`.
+2. Download `mcp-proxy-handoff-linux-amd64-<sha256>.tar.gz` and check
+   its SHA-256 against the checkout's pin.
+3. Save the verified archive as `~/.punt-labs/ethos/runtimes/<sha256>.tar.gz`.
+   Do not unpack it; Ethos verifies and prepares it.
+
+Use an Ethos build that supports DES-086 worktree snapshots. The bundled Go
+vulnerability database expires after 72 hours. A stale or
+missing runtime defers the sandbox check; run `make check` live in that
+case. Live and CI checks use `https://vuln.go.dev` by default.
+
+To refresh the runtime, dispatch **Handoff runtime** from `main` and update
+the sidecar from the new asset's checksum. For the first publication before
+the workflow is on `main`, a maintainer can push the `handoff-runtime` tag
+on a reviewed provisioning commit. Use the digest of the published bytes,
+not a local rebuild. Build a local archive for testing with
+`bash scripts/build-handoff-runtime.sh /path/to/runtime.tar.gz`.
+
+## End-to-end tests
+
 End-to-end tests build the binary and run it as a black box. They are not part of `make check`:
 
 ```bash
